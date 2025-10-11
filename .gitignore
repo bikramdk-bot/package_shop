@@ -1,0 +1,36 @@
+# Tests
+test/
+tests/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# SQLite / data
+db/*.db
+logs/
+*.log
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Android / ADB
+*.apk
+.idea/
+.gradle/
+local.properties
+
+# Tem
