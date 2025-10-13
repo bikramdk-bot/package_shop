@@ -4,42 +4,96 @@
 <meta charset="UTF-8">
 <title>Live Customer Entries</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+  th { background: #f0f0f0; }
+  .countdown { font-weight: bold; }
+</style>
 </head>
 <body>
   <h2>👀 Live Customer Queue</h2>
   <table id="table">
     <thead>
-      <tr><th>ID</th><th>Provider</th><th>Digits</th><th>Status</th><th>Hold</th></tr>
+      <tr>
+        <th>ID</th>
+        <th>Provider</th>
+        <th>Digits</th>
+        <th>Status</th>
+        <th>Countdown</th>
+        <th>Hold</th>
+      </tr>
     </thead>
     <tbody></tbody>
   </table>
 
 <script>
+let entriesCache = [];
+
 async function loadEntries() {
   const res = await fetch('/customer_entries');
   const data = await res.json();
   const tbody = document.querySelector('#table tbody');
   tbody.innerHTML = '';
+
+  entriesCache = data; // store for countdown updates
+
+  const now = new Date();
+
   for (const row of data) {
+    const createdAt = new Date(row.created_at);
+    const elapsed = (now - createdAt) / 1000;
+    const remaining = Math.max(0, 120 - elapsed);
+
     const tr = document.createElement('tr');
+
+    // color-code based on remaining time
+    const color =
+      remaining <= 15 ? 'red' :
+      remaining <= 60 ? 'orange' : 'green';
+
     tr.innerHTML = `
       <td>${row.id}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${row.status}</td>
+      <td>${row.matched ? 'MATCHED' : 'PENDING'}</td>
+      <td class="countdown" data-created="${row.created_at}" style="color:${color}">
+        ${remaining.toFixed(0)}s
+      </td>
       <td><button onclick="hold(${row.id})">Hold</button></td>
     `;
+
     tbody.appendChild(tr);
   }
 }
+
+function updateCountdowns() {
+  const cells = document.querySelectorAll('.countdown');
+  const now = new Date();
+  cells.forEach(cell => {
+    const created = new Date(cell.dataset.created);
+    const elapsed = (now - created) / 1000;
+    const remaining = Math.max(0, 120 - elapsed);
+    cell.textContent = `${remaining.toFixed(0)}s`;
+    cell.style.color =
+      remaining <= 15 ? 'red' :
+      remaining <= 60 ? 'orange' : 'green';
+  });
+}
+
 async function hold(id) {
   await fetch('/hold_entry', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({id})
+    body: JSON.stringify({ entry_id: id })
   });
+  loadEntries(); // refresh after hold
 }
+
+// refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);
+setInterval(updateCountdowns, 1000);
 loadEntries();
 </script>
 </body>

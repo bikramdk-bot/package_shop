@@ -179,9 +179,14 @@ def get_customer_entries():
         WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
     """)
 
-    # 4️⃣ Fetch active entries
-    cursor.execute("SELECT * FROM customer_entries ORDER BY created_at DESC")
+    # 4️⃣ Fetch only *active* (non-held) entries for live view
+    cursor.execute("""
+    SELECT * FROM customer_entries
+    WHERE status != 'hold'
+    ORDER BY created_at DESC
+    """)
     entries = [dict(r) for r in cursor.fetchall()]
+
 
     # 5️⃣ Add match flag
     for e in entries:
@@ -200,27 +205,34 @@ def get_customer_entries():
 # ---------------------- HOLD ENTRY ----------------------
 @app.route("/hold_entry", methods=["POST"])
 def hold_entry():
-    """Mark a customer entry as held and record it in log."""
     data = request.get_json(force=True)
-    entry_id = data.get("id")
+    entry_id = data.get("entry_id")
+
+    if not entry_id:
+        return jsonify({"error": "Missing entry_id"}), 400
 
     conn = sqlite3.connect("db/parcels.db")
     cursor = conn.cursor()
 
-    # Get entry details before updating
-    cursor.execute("SELECT provider, digits FROM customer_entries WHERE id=?", (entry_id,))
-    row = cursor.fetchone()
-    if row:
-        cursor.execute("""
-            INSERT INTO collected_log (provider, digits, log_type)
-            VALUES (?, ?, 'held')
-        """, (row[0], row[1]))
+    # Update customer entry to 'hold'
+    cursor.execute("""
+        UPDATE customer_entries
+        SET status = 'hold'
+        WHERE id = ?
+    """, (entry_id,))
 
-    # Update status to hold
-    cursor.execute("UPDATE customer_entries SET status='hold' WHERE id=?", (entry_id,))
+    # Log held action (optional)
+    cursor.execute("""
+        INSERT INTO collected_log (provider, digits, barcode, log_type)
+        SELECT provider, digits, NULL, 'held'
+        FROM customer_entries
+        WHERE id = ?
+    """, (entry_id,))
+
     conn.commit()
     conn.close()
-    return jsonify({"message": "Entry held and logged."})
+    return jsonify({"message": f"Entry {entry_id} held and hidden from live list."})
+
 
 
 # ---------------------- COLLECTED LOG ----------------------
