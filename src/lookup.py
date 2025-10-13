@@ -106,8 +106,25 @@ def init_customer_table():
     conn.commit()
     conn.close()
 
+def init_collected_log():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS collected_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            digits TEXT,
+            barcode TEXT,
+            collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
 
 if __name__ == "__main__":
     init_db()
     init_customer_table()
+    init_collected_log()
     print("Database initialized.")

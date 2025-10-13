@@ -131,34 +131,47 @@ def customer_entry():
     return jsonify({"message": "Customer entry recorded."})
 
 
+# ---------------------- CUSTOMER ENTRIES (auto-match + logging) ----------------------
 @app.route("/customer_entries")
 def get_customer_entries():
-    """Fetch live customer entries, match against parcels, and clean old ones."""
+    """Fetch live customer entries, match vs parcels, and clean + log all outcomes."""
     import sqlite3
 
     conn = sqlite3.connect("db/parcels.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1️⃣ Find expired entries (>120s) that are NOT held
+    # 1️⃣ Identify expired (non-held) customer entries
     cursor.execute("""
         SELECT id, provider, digits FROM customer_entries
         WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
     """)
     expired = cursor.fetchall()
 
-    # 2️⃣ For each expired entry, if it matched a parcel, delete parcel as collected
     for e in expired:
         c2 = conn.cursor()
+
+        # 2️⃣ Check if parcel matched
         c2.execute("""
-            SELECT id FROM parcels
+            SELECT id, provider, digits, barcode FROM parcels
             WHERE provider=? AND digits=? AND status='in_shop'
         """, (e["provider"], e["digits"]))
         parcel = c2.fetchone()
+
         if parcel:
-            # delete parcel (collected)
+            # ✅ Case 1: Matched → collected
+            c2.execute("""
+                INSERT INTO collected_log (provider, digits, barcode, log_type)
+                VALUES (?, ?, ?, 'collected')
+            """, (parcel["provider"], parcel["digits"], parcel["barcode"]))
             c2.execute("DELETE FROM parcels WHERE id=?", (parcel["id"],))
-            print(f"Deleted parcel {parcel['id']} (collected by customer)")
+            print(f"Logged and deleted parcel {parcel['id']}")
+        else:
+            # ❌ Case 2: No parcel match → expired_unmatched
+            c2.execute("""
+                INSERT INTO collected_log (provider, digits, log_type)
+                VALUES (?, ?, 'expired_unmatched')
+            """, (e["provider"], e["digits"]))
 
     # 3️⃣ Delete expired customer entries
     cursor.execute("""
@@ -170,7 +183,7 @@ def get_customer_entries():
     cursor.execute("SELECT * FROM customer_entries ORDER BY created_at DESC")
     entries = [dict(r) for r in cursor.fetchall()]
 
-    # 5️⃣ Add match info
+    # 5️⃣ Add match flag
     for e in entries:
         c2 = conn.cursor()
         c2.execute("""
@@ -184,17 +197,45 @@ def get_customer_entries():
     return jsonify(entries)
 
 
+# ---------------------- HOLD ENTRY ----------------------
 @app.route("/hold_entry", methods=["POST"])
 def hold_entry():
-    """Mark a customer entry as hold."""
+    """Mark a customer entry as held and record it in log."""
     data = request.get_json(force=True)
     entry_id = data.get("id")
+
     conn = sqlite3.connect("db/parcels.db")
     cursor = conn.cursor()
+
+    # Get entry details before updating
+    cursor.execute("SELECT provider, digits FROM customer_entries WHERE id=?", (entry_id,))
+    row = cursor.fetchone()
+    if row:
+        cursor.execute("""
+            INSERT INTO collected_log (provider, digits, log_type)
+            VALUES (?, ?, 'held')
+        """, (row[0], row[1]))
+
+    # Update status to hold
     cursor.execute("UPDATE customer_entries SET status='hold' WHERE id=?", (entry_id,))
     conn.commit()
     conn.close()
-    return jsonify({"message": "Entry held."})
+    return jsonify({"message": "Entry held and logged."})
+
+
+# ---------------------- COLLECTED LOG ----------------------
+@app.route("/collected_log")
+def collected_log():
+    """Show list of all logged parcel actions."""
+    import sqlite3
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM collected_log ORDER BY collected_at DESC")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
 
 @app.route("/customer")
 def customer_page():
