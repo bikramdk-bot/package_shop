@@ -2,40 +2,128 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Customer Check-in</title>
+<title>Live Customer Entries</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 20px;
+    background: #fafafa;
+  }
+  h2 {
+    margin-bottom: 12px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 0 8px rgba(0,0,0,0.1);
+  }
+  th, td {
+    border: 1px solid #ddd;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  th {
+    background: #f2f2f2;
+  }
+  tr.match {
+    background: #d4edda; /* green */
+  }
+  tr.nomatch {
+    background: #f8d7da; /* red */
+  }
+  tr.hold {
+    background: #fff3cd; /* yellow */
+  }
+  button {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button:hover {
+    opacity: 0.8;
+  }
+  .hold-btn {
+    background-color: #ffb703;
+  }
+</style>
 </head>
 <body>
-  <h2>📦 Enter your delivery details</h2>
-  <form onsubmit="submitEntry(); return false;">
-    <label>Logistics Company:</label>
-    <select id="provider">
-      <option value="PostNord">PostNord</option>
-      <option value="DAO">DAO</option>
-      <option value="UPS">UPS</option>
-      <option value="GLS">GLS</option>
-    </select>
+  <h2>👀 Live Customer Entries</h2>
+  <table id="table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Provider</th>
+        <th>Digits</th>
+        <th>Status</th>
+        <th>Match</th>
+        <th>Countdown</th>
+        <th>Hold</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-    <label>Last 4 digits:</label>
-    <input type="number" id="digits" maxlength="4" required>
-    <button type="submit">Submit</button>
-  </form>
+<script>
+function secondsLeft(createdAt) {
+  const created = new Date(createdAt);
+  const now = new Date();
+  const diff = (now - created) / 1000;
+  return Math.max(0, 120 - Math.floor(diff));
+}
 
-  <p id="message"></p>
+async function hold(id) {
+  await fetch('/hold_entry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id})
+  });
+}
 
-  <script>
-  async function submitEntry() {
-    const provider = document.getElementById('provider').value;
-    const digits = document.getElementById('digits').value;
-    const res = await fetch('/customer_entry', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({provider, digits})
-    });
-    const data = await res.json();
-    document.getElementById('message').textContent = data.message;
-    document.getElementById('digits').value = '';
-  }
-  </script>
+function renderEntries(data) {
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = '';
+
+  data.forEach(row => {
+    const secs = secondsLeft(row.created_at);
+    const statusClass = row.status === 'hold'
+      ? 'hold'
+      : (row.matched ? 'match' : 'nomatch');
+
+    const tr = document.createElement('tr');
+    tr.className = statusClass;
+
+    // auto-hide rows that reached 0 seconds (will also be deleted from DB soon)
+    if (row.status !== 'hold' && secs <= 0) return;
+
+    tr.innerHTML = `
+      <td>${row.id}</td>
+      <td>${row.provider}</td>
+      <td>${row.digits}</td>
+      <td>${row.status}</td>
+      <td>${row.matched ? '✅' : '❌'}</td>
+      <td>${secs}s</td>
+      <td><button class="hold-btn" onclick="hold(${row.id})">Hold</button></td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function refresh() {
+  const res = await fetch('/customer_entries');
+  const data = await res.json();
+  renderEntries(data);
+}
+
+// Refresh every 1 second
+setInterval(refresh, 1000);
+refresh();
+</script>
 </body>
 </html>

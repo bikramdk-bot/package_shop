@@ -133,26 +133,55 @@ def customer_entry():
 
 @app.route("/customer_entries")
 def get_customer_entries():
-    """Fetch live customer entries within last 120 sec, delete expired."""
+    """Fetch live customer entries, match against parcels, and clean old ones."""
+    import sqlite3
+
     conn = sqlite3.connect("db/parcels.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Delete old entries (>120s)
+    # 1️⃣ Find expired entries (>120s) that are NOT held
+    cursor.execute("""
+        SELECT id, provider, digits FROM customer_entries
+        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+    """)
+    expired = cursor.fetchall()
+
+    # 2️⃣ For each expired entry, if it matched a parcel, delete parcel as collected
+    for e in expired:
+        c2 = conn.cursor()
+        c2.execute("""
+            SELECT id FROM parcels
+            WHERE provider=? AND digits=? AND status='in_shop'
+        """, (e["provider"], e["digits"]))
+        parcel = c2.fetchone()
+        if parcel:
+            # delete parcel (collected)
+            c2.execute("DELETE FROM parcels WHERE id=?", (parcel["id"],))
+            print(f"Deleted parcel {parcel['id']} (collected by customer)")
+
+    # 3️⃣ Delete expired customer entries
     cursor.execute("""
         DELETE FROM customer_entries
         WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
     """)
 
-    # Fetch live entries
-    cursor.execute("""
-        SELECT * FROM customer_entries
-        ORDER BY created_at DESC
-    """)
-    rows = [dict(r) for r in cursor.fetchall()]
+    # 4️⃣ Fetch active entries
+    cursor.execute("SELECT * FROM customer_entries ORDER BY created_at DESC")
+    entries = [dict(r) for r in cursor.fetchall()]
+
+    # 5️⃣ Add match info
+    for e in entries:
+        c2 = conn.cursor()
+        c2.execute("""
+            SELECT COUNT(*) FROM parcels
+            WHERE provider=? AND digits=?
+        """, (e["provider"], e["digits"]))
+        e["matched"] = c2.fetchone()[0] > 0
+
     conn.commit()
     conn.close()
-    return jsonify(rows)
+    return jsonify(entries)
 
 
 @app.route("/hold_entry", methods=["POST"])
