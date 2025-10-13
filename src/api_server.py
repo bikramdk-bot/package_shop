@@ -123,9 +123,10 @@ def customer_entry():
     conn = sqlite3.connect("db/parcels.db")
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO customer_entries (provider, digits, status)
-        VALUES (?, ?, 'pending')
+    INSERT INTO customer_entries (provider, digits, status, created_at)
+    VALUES (?, ?, 'pending', datetime('now'))
     """, (provider, digits))
+
     conn.commit()
     conn.close()
     return jsonify({"message": "Customer entry recorded."})
