@@ -244,15 +244,22 @@ def hold_entry():
 # ---------------------- COLLECTED LOG ----------------------
 @app.route("/collected_log")
 def collected_log():
-    """Show list of all logged parcel actions."""
     import sqlite3
     conn = sqlite3.connect("db/parcels.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM collected_log ORDER BY collected_at DESC")
-    rows = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("""
+        SELECT provider, digits, barcode, log_type, collected_at
+        FROM collected_log
+        ORDER BY collected_at DESC
+        LIMIT 200
+    """)
+    rows = cursor.fetchall()
     conn.close()
-    return jsonify(rows)
+
+    return render_template("collected_log.html", rows=rows)
+
 
 
 @app.route("/customer")
