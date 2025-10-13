@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Staff Parcel Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <h2>📦 Parcels in Shop</h2>
+
+  <table id="parcelTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Provider</th>
+        <th>Digits</th>
+        <th>Barcode</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+  async function loadParcels() {
+    const res = await fetch('/all_parcels');
+    const data = await res.json();
+    const tbody = document.querySelector('#parcelTable tbody');
+    tbody.innerHTML = '';
+    data.forEach(row => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${row.id}</td>
+        <td>${row.provider}</td>
+        <td>${row.digits}</td>
+        <td>${row.barcode || ''}</td>
+        <td>${row.status}</td>
+        <td>
+          <button onclick="updateStatus('${row.provider}', '${row.digits}', 'collected')">✅ Collected</button>
+          <button onclick="deleteParcel('${row.provider}', '${row.digits}')">🗑️ Delete</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function updateStatus(provider, digits, status) {
+    await fetch('/update_status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({provider, digits, status})
+    });
+    loadParcels();
+  }
+
+  async function deleteParcel(provider, digits) {
+    await fetch('/delete_parcel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({provider, digits})
+    });
+    loadParcels();
+  }
+
+  loadParcels();
+  </script>
+</body>
+</html>
