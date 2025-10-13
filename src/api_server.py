@@ -182,12 +182,11 @@ def get_customer_entries():
 
     # 4️⃣ Fetch only *active* (non-held) entries for live view
     cursor.execute("""
-    SELECT * FROM customer_entries
-    WHERE status != 'hold'
-    ORDER BY created_at DESC
+        SELECT * FROM customer_entries
+        WHERE status != 'hold'
+        ORDER BY created_at DESC
     """)
     entries = [dict(r) for r in cursor.fetchall()]
-
 
     # 5️⃣ Add match flag
     for e in entries:
@@ -198,9 +197,15 @@ def get_customer_entries():
         """, (e["provider"], e["digits"]))
         e["matched"] = c2.fetchone()[0] > 0
 
+    # ✅ 6️⃣ Convert created_at to ISO format for browser (so countdown works)
+    for e in entries:
+        if "created_at" in e and e["created_at"]:
+            e["created_at"] = e["created_at"].replace(" ", "T") + "Z"
+
     conn.commit()
     conn.close()
     return jsonify(entries)
+
 
 
 # ---------------------- HOLD ENTRY ----------------------
