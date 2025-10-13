@@ -1,0 +1,25 @@
+<!-- templates/nav_bar.html -->
+<div style="
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 10px;
+  z-index: 999;
+">
+  <a href="{{ url_for('live_customers') }}"
+     style="padding:8px 12px;background:#007bff;color:white;
+            border-radius:6px;text-decoration:none;font-weight:bold;">
+     🧍 Live Customers
+  </a>
+  <a href="{{ url_for('dashboard') }}"
+     style="padding:8px 12px;background:#28a745;color:white;
+            border-radius:6px;text-decoration:none;font-weight:bold;">
+     📦 Dashboard
+  </a>
+  <a href="{{ url_for('collected_log') }}"
+     style="padding:8px 12px;background:#6c757d;color:white;
+            border-radius:6px;text-decoration:none;font-weight:bold;">
+     🗒️ Log
+  </a>
+</div>
