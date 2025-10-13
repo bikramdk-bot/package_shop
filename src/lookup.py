@@ -115,6 +115,7 @@ def init_collected_log():
             provider TEXT,
             digits TEXT,
             barcode TEXT,
+            log_type TEXT,
             collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
