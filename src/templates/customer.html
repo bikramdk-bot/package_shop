@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Customer Check-in</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <h2>📦 Enter your delivery details</h2>
+  <form onsubmit="submitEntry(); return false;">
+    <label>Logistics Company:</label>
+    <select id="provider">
+      <option value="PostNord">PostNord</option>
+      <option value="DAO">DAO</option>
+      <option value="UPS">UPS</option>
+      <option value="GLS">GLS</option>
+    </select>
+
+    <label>Last 4 digits:</label>
+    <input type="number" id="digits" maxlength="4" required>
+    <button type="submit">Submit</button>
+  </form>
+
+  <p id="message"></p>
+
+  <script>
+  async function submitEntry() {
+    const provider = document.getElementById('provider').value;
+    const digits = document.getElementById('digits').value;
+    const res = await fetch('/customer_entry', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({provider, digits})
+    });
+    const data = await res.json();
+    document.getElementById('message').textContent = data.message;
+    document.getElementById('digits').value = '';
+  }
+  </script>
+</body>
+</html>

@@ -108,6 +108,72 @@ def all_parcels():
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(rows)
+import sqlite3
+from datetime import datetime, timedelta
+
+# ---------------------- CUSTOMER ENTRY ----------------------
+@app.route("/customer_entry", methods=["POST"])
+def customer_entry():
+    data = request.get_json(force=True)
+    provider = data.get("provider")
+    digits = data.get("digits")
+    if not provider or not digits:
+        return jsonify({"error": "Missing provider or digits"}), 400
+
+    conn = sqlite3.connect("db/parcels.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO customer_entries (provider, digits, status)
+        VALUES (?, ?, 'pending')
+    """, (provider, digits))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Customer entry recorded."})
+
+
+@app.route("/customer_entries")
+def get_customer_entries():
+    """Fetch live customer entries within last 120 sec, delete expired."""
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Delete old entries (>120s)
+    cursor.execute("""
+        DELETE FROM customer_entries
+        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+    """)
+
+    # Fetch live entries
+    cursor.execute("""
+        SELECT * FROM customer_entries
+        ORDER BY created_at DESC
+    """)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.commit()
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/hold_entry", methods=["POST"])
+def hold_entry():
+    """Mark a customer entry as hold."""
+    data = request.get_json(force=True)
+    entry_id = data.get("id")
+    conn = sqlite3.connect("db/parcels.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE customer_entries SET status='hold' WHERE id=?", (entry_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Entry held."})
+
+@app.route("/customer")
+def customer_page():
+    return render_template("customer.html")
+
+@app.route("/live_customers")
+def live_customers():
+    return render_template("live_customers.html")
 
 
 if __name__ == "__main__":

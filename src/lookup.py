@@ -91,7 +91,23 @@ def delete_parcel(provider, digits):
     conn.close()
     return {"message": "Parcel deleted."}
 
+def init_customer_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS customer_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            digits TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 
 if __name__ == "__main__":
     init_db()
+    init_customer_table()
     print("Database initialized.")
