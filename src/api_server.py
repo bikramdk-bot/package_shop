@@ -90,6 +90,25 @@ def delete_parcel_api():
 def health_check():
     return jsonify({"status": "ok"})
 
+from flask import render_template
+from lookup import search_parcel
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+@app.route("/all_parcels")
+def all_parcels():
+    """Return all parcels in the DB."""
+    import sqlite3
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM parcels ORDER BY scan_time DESC;")
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
