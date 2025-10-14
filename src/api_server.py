@@ -269,6 +269,10 @@ def customer_page():
 @app.route("/live_customers")
 def live_customers():
     return render_template("live_customers.html")
+@app.route("/manual_label_page")
+def manual_label_page():
+    return render_template("manual_label.html")
+
 
 
 if __name__ == "__main__":
