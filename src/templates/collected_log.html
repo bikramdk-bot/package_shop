@@ -1,0 +1,42 @@
+<!-- templates/collected_log.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Collected Log</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 60px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  {% include 'nav_bar.html' %}
+  <h2>🗒️ Collected / Held / Expired Parcels</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Provider</th>
+        <th>Digits</th>
+        <th>Barcode</th>
+        <th>Type</th>
+        <th>Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r['provider'] }}</td>
+        <td>{{ r['digits'] }}</td>
+        <td>{{ r['barcode'] }}</td>
+        <td>{{ r['log_type'] }}</td>
+        <td>{{ r['collected_at'] }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

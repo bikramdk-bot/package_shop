@@ -3,15 +3,22 @@ from lookup import search_parcel, insert_parcel
 
 app = Flask(__name__)
 
-@app.route("/lookup", methods=["POST"])
+# ---------------------- LOOKUP ----------------------
+@app.route("/lookup", methods=["GET", "POST"])
 def lookup_parcel():
     """
-    Customer tablet sends JSON:
-    {"provider": "PostNord", "digits": "1234"}
+    Customer tablet sends either:
+    POST JSON: {"provider": "PostNord", "digits": "1234"}
+    or
+    GET params: /lookup?provider=PostNord&digits=1234
     """
-    data = request.get_json(force=True)
-    provider = data.get("provider")
-    digits = data.get("digits")
+    if request.method == "GET":
+        provider = request.args.get("provider")
+        digits = request.args.get("digits")
+    else:
+        data = request.get_json(force=True)
+        provider = data.get("provider")
+        digits = data.get("digits")
 
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
@@ -20,6 +27,7 @@ def lookup_parcel():
     return jsonify({"results": results})
 
 
+# ---------------------- INSERT ----------------------
 @app.route("/insert", methods=["POST"])
 def insert_parcel_api():
     """
@@ -36,10 +44,235 @@ def insert_parcel_api():
     insert_parcel(provider, digits)
     return jsonify({"status": "inserted", "provider": provider, "digits": digits})
 
+# ---------------------- UPDATE STATUS ----------------------
+@app.route("/update_status", methods=["POST"])
+def update_status_api():
+    """
+    Staff marks parcel as collected, held, etc.
+    Example:
+    {"provider": "PostNord", "digits": "7890", "status": "collected"}
+    """
+    data = request.get_json(force=True)
+    provider = data.get("provider")
+    digits = data.get("digits")
+    new_status = data.get("status")
 
+    if not provider or not digits or not new_status:
+        return jsonify({"error": "Missing provider, digits, or status"}), 400
+
+    from lookup import update_status
+    result = update_status(provider, digits, new_status)
+    return jsonify(result)
+
+
+# ---------------------- DELETE PARCEL ----------------------
+@app.route("/delete_parcel", methods=["POST"])
+def delete_parcel_api():
+    """
+    Staff manually deletes a parcel record.
+    Example:
+    {"provider": "PostNord", "digits": "7890"}
+    """
+    data = request.get_json(force=True)
+    provider = data.get("provider")
+    digits = data.get("digits")
+
+    if not provider or not digits:
+        return jsonify({"error": "Missing provider or digits"}), 400
+
+    from lookup import delete_parcel
+    result = delete_parcel(provider, digits)
+    return jsonify(result)
+
+
+# ---------------------- HEALTH ----------------------
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({"status": "ok"})
+
+from flask import render_template
+from lookup import search_parcel
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html")
+
+@app.route("/all_parcels")
+def all_parcels():
+    """Return all parcels in the DB."""
+    import sqlite3
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM parcels ORDER BY scan_time DESC;")
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+import sqlite3
+from datetime import datetime, timedelta
+
+# ---------------------- CUSTOMER ENTRY ----------------------
+@app.route("/customer_entry", methods=["POST"])
+def customer_entry():
+    data = request.get_json(force=True)
+    provider = data.get("provider")
+    digits = data.get("digits")
+    if not provider or not digits:
+        return jsonify({"error": "Missing provider or digits"}), 400
+
+    conn = sqlite3.connect("db/parcels.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO customer_entries (provider, digits, status, created_at)
+    VALUES (?, ?, 'pending', datetime('now'))
+    """, (provider, digits))
+
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Customer entry recorded."})
+
+
+# ---------------------- CUSTOMER ENTRIES (auto-match + logging) ----------------------
+@app.route("/customer_entries")
+def get_customer_entries():
+    """Fetch live customer entries, match vs parcels, and clean + log all outcomes."""
+    import sqlite3
+
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # 1️⃣ Identify expired (non-held) customer entries
+    cursor.execute("""
+        SELECT id, provider, digits FROM customer_entries
+        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+    """)
+    expired = cursor.fetchall()
+
+    for e in expired:
+        c2 = conn.cursor()
+
+        # 2️⃣ Check if parcel matched
+        c2.execute("""
+            SELECT id, provider, digits, barcode FROM parcels
+            WHERE provider=? AND digits=? AND status='in_shop'
+        """, (e["provider"], e["digits"]))
+        parcel = c2.fetchone()
+
+        if parcel:
+            # ✅ Case 1: Matched → collected
+            c2.execute("""
+                INSERT INTO collected_log (provider, digits, barcode, log_type)
+                VALUES (?, ?, ?, 'collected')
+            """, (parcel["provider"], parcel["digits"], parcel["barcode"]))
+            c2.execute("DELETE FROM parcels WHERE id=?", (parcel["id"],))
+            print(f"Logged and deleted parcel {parcel['id']}")
+        else:
+            # ❌ Case 2: No parcel match → expired_unmatched
+            c2.execute("""
+                INSERT INTO collected_log (provider, digits, log_type)
+                VALUES (?, ?, 'expired_unmatched')
+            """, (e["provider"], e["digits"]))
+
+    # 3️⃣ Delete expired customer entries
+    cursor.execute("""
+        DELETE FROM customer_entries
+        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+    """)
+
+    # 4️⃣ Fetch only *active* (non-held) entries for live view
+    cursor.execute("""
+        SELECT * FROM customer_entries
+        WHERE status != 'hold'
+        ORDER BY created_at DESC
+    """)
+    entries = [dict(r) for r in cursor.fetchall()]
+
+    # 5️⃣ Add match flag
+    for e in entries:
+        c2 = conn.cursor()
+        c2.execute("""
+            SELECT COUNT(*) FROM parcels
+            WHERE provider=? AND digits=?
+        """, (e["provider"], e["digits"]))
+        e["matched"] = c2.fetchone()[0] > 0
+
+    # ✅ 6️⃣ Convert created_at to ISO format for browser (so countdown works)
+    for e in entries:
+        if "created_at" in e and e["created_at"]:
+            e["created_at"] = e["created_at"].replace(" ", "T") + "Z"
+
+    conn.commit()
+    conn.close()
+    return jsonify(entries)
+
+
+
+# ---------------------- HOLD ENTRY ----------------------
+@app.route("/hold_entry", methods=["POST"])
+def hold_entry():
+    data = request.get_json(force=True)
+    entry_id = data.get("entry_id")
+
+    if not entry_id:
+        return jsonify({"error": "Missing entry_id"}), 400
+
+    conn = sqlite3.connect("db/parcels.db")
+    cursor = conn.cursor()
+
+    # Update customer entry to 'hold'
+    cursor.execute("""
+        UPDATE customer_entries
+        SET status = 'hold'
+        WHERE id = ?
+    """, (entry_id,))
+
+    # Log held action (optional)
+    cursor.execute("""
+        INSERT INTO collected_log (provider, digits, barcode, log_type)
+        SELECT provider, digits, NULL, 'held'
+        FROM customer_entries
+        WHERE id = ?
+    """, (entry_id,))
+
+    conn.commit()
+    conn.close()
+    return jsonify({"message": f"Entry {entry_id} held and hidden from live list."})
+
+
+
+# ---------------------- COLLECTED LOG ----------------------
+@app.route("/collected_log")
+def collected_log():
+    import sqlite3
+    conn = sqlite3.connect("db/parcels.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT provider, digits, barcode, log_type, collected_at
+        FROM collected_log
+        ORDER BY collected_at DESC
+        LIMIT 200
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    return render_template("collected_log.html", rows=rows)
+
+
+
+@app.route("/customer")
+def customer_page():
+    return render_template("customer.html")
+
+@app.route("/live_customers")
+def live_customers():
+    return render_template("live_customers.html")
+@app.route("/manual_label_page")
+def manual_label_page():
+    return render_template("manual_label.html")
+
 
 
 if __name__ == "__main__":
