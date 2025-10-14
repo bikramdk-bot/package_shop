@@ -1,7 +1,7 @@
-import sqlite3
+import sqlite3, os
 from datetime import datetime
 
-DB_PATH = "db/parcels.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 
 
 # ---------------------- INIT ----------------------
