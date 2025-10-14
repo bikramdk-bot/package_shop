@@ -18,3 +18,8 @@ def init_db():
     conn.commit()
     conn.close()
     print("✅ Database initialized at", DB_PATH)
+
+
+# 👇 Add this so it actually runs
+if __name__ == "__main__":
+    init_db()
