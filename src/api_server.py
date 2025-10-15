@@ -1,5 +1,7 @@
-from flask import Flask, request, jsonify
-from lookup import search_parcel, insert_parcel
+from flask import Flask, request, jsonify, render_template
+from lookup import search_parcel, insert_parcel, update_status, delete_parcel
+import sqlite3
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -41,14 +43,15 @@ def insert_parcel_api():
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
-    insert_parcel(provider, digits)
-    return jsonify({"status": "inserted", "provider": provider, "digits": digits})
+    result = insert_parcel(provider, digits)
+    return jsonify(result)
+
 
 # ---------------------- UPDATE STATUS ----------------------
 @app.route("/update_status", methods=["POST"])
 def update_status_api():
     """
-    Staff marks parcel as collected, held, etc.
+    Staff marks packet as collected, held, etc.
     Example:
     {"provider": "PostNord", "digits": "7890", "status": "collected"}
     """
@@ -60,16 +63,15 @@ def update_status_api():
     if not provider or not digits or not new_status:
         return jsonify({"error": "Missing provider, digits, or status"}), 400
 
-    from lookup import update_status
     result = update_status(provider, digits, new_status)
     return jsonify(result)
 
 
-# ---------------------- DELETE PARCEL ----------------------
+# ---------------------- DELETE ----------------------
 @app.route("/delete_parcel", methods=["POST"])
 def delete_parcel_api():
     """
-    Staff manually deletes a parcel record.
+    Staff manually deletes a packet record.
     Example:
     {"provider": "PostNord", "digits": "7890"}
     """
@@ -80,7 +82,6 @@ def delete_parcel_api():
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
-    from lookup import delete_parcel
     result = delete_parcel(provider, digits)
     return jsonify(result)
 
@@ -90,26 +91,24 @@ def delete_parcel_api():
 def health_check():
     return jsonify({"status": "ok"})
 
-from flask import render_template
-from lookup import search_parcel
 
+# ---------------------- DASHBOARD ----------------------
 @app.route("/dashboard")
 def dashboard():
     return render_template("dashboard.html")
 
+
 @app.route("/all_parcels")
 def all_parcels():
-    """Return all parcels in the DB."""
-    import sqlite3
-    conn = sqlite3.connect("db/parcels.db")
+    """Return all packets in the DB."""
+    conn = sqlite3.connect("db/packets.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM parcels ORDER BY scan_time DESC;")
+    cursor.execute("SELECT * FROM packets ORDER BY scan_time DESC;")
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify(rows)
-import sqlite3
-from datetime import datetime, timedelta
+
 
 # ---------------------- CUSTOMER ENTRY ----------------------
 @app.route("/customer_entry", methods=["POST"])
@@ -120,7 +119,7 @@ def customer_entry():
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
-    conn = sqlite3.connect("db/parcels.db")
+    conn = sqlite3.connect("db/packets.db")
     cursor = conn.cursor()
     cursor.execute("""
     INSERT INTO customer_entries (provider, digits, status, created_at)
@@ -135,10 +134,8 @@ def customer_entry():
 # ---------------------- CUSTOMER ENTRIES (auto-match + logging) ----------------------
 @app.route("/customer_entries")
 def get_customer_entries():
-    """Fetch live customer entries, match vs parcels, and clean + log all outcomes."""
-    import sqlite3
-
-    conn = sqlite3.connect("db/parcels.db")
+    """Fetch live customer entries, match vs packets, and clean + log all outcomes."""
+    conn = sqlite3.connect("db/packets.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -152,23 +149,23 @@ def get_customer_entries():
     for e in expired:
         c2 = conn.cursor()
 
-        # 2️⃣ Check if parcel matched
+        # 2️⃣ Check if packet matched
         c2.execute("""
-            SELECT id, provider, digits, barcode FROM parcels
+            SELECT id, provider, digits, barcode FROM packets
             WHERE provider=? AND digits=? AND status='in_shop'
         """, (e["provider"], e["digits"]))
-        parcel = c2.fetchone()
+        packet = c2.fetchone()
 
-        if parcel:
+        if packet:
             # ✅ Case 1: Matched → collected
             c2.execute("""
                 INSERT INTO collected_log (provider, digits, barcode, log_type)
                 VALUES (?, ?, ?, 'collected')
-            """, (parcel["provider"], parcel["digits"], parcel["barcode"]))
-            c2.execute("DELETE FROM parcels WHERE id=?", (parcel["id"],))
-            print(f"Logged and deleted parcel {parcel['id']}")
+            """, (packet["provider"], packet["digits"], packet["barcode"]))
+            c2.execute("DELETE FROM packets WHERE id=?", (packet["id"],))
+            print(f"Logged and deleted packet {packet['id']}")
         else:
-            # ❌ Case 2: No parcel match → expired_unmatched
+            # ❌ Case 2: No packet match → expired_unmatched
             c2.execute("""
                 INSERT INTO collected_log (provider, digits, log_type)
                 VALUES (?, ?, 'expired_unmatched')
@@ -192,12 +189,12 @@ def get_customer_entries():
     for e in entries:
         c2 = conn.cursor()
         c2.execute("""
-            SELECT COUNT(*) FROM parcels
+            SELECT COUNT(*) FROM packets
             WHERE provider=? AND digits=?
         """, (e["provider"], e["digits"]))
         e["matched"] = c2.fetchone()[0] > 0
 
-    # ✅ 6️⃣ Convert created_at to ISO format for browser (so countdown works)
+    # 6️⃣ Convert created_at to ISO format for browser (so countdown works)
     for e in entries:
         if "created_at" in e and e["created_at"]:
             e["created_at"] = e["created_at"].replace(" ", "T") + "Z"
@@ -205,7 +202,6 @@ def get_customer_entries():
     conn.commit()
     conn.close()
     return jsonify(entries)
-
 
 
 # ---------------------- HOLD ENTRY ----------------------
@@ -217,7 +213,7 @@ def hold_entry():
     if not entry_id:
         return jsonify({"error": "Missing entry_id"}), 400
 
-    conn = sqlite3.connect("db/parcels.db")
+    conn = sqlite3.connect("db/packets.db")
     cursor = conn.cursor()
 
     # Update customer entry to 'hold'
@@ -227,7 +223,7 @@ def hold_entry():
         WHERE id = ?
     """, (entry_id,))
 
-    # Log held action (optional)
+    # Log held action
     cursor.execute("""
         INSERT INTO collected_log (provider, digits, barcode, log_type)
         SELECT provider, digits, NULL, 'held'
@@ -240,12 +236,10 @@ def hold_entry():
     return jsonify({"message": f"Entry {entry_id} held and hidden from live list."})
 
 
-
 # ---------------------- COLLECTED LOG ----------------------
 @app.route("/collected_log")
 def collected_log():
-    import sqlite3
-    conn = sqlite3.connect("db/parcels.db")
+    conn = sqlite3.connect("db/packets.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -261,7 +255,7 @@ def collected_log():
     return render_template("collected_log.html", rows=rows)
 
 
-
+# ---------------------- PAGES ----------------------
 @app.route("/customer")
 def customer_page():
     return render_template("customer.html")
@@ -269,11 +263,12 @@ def customer_page():
 @app.route("/live_customers")
 def live_customers():
     return render_template("live_customers.html")
+
 @app.route("/manual_label_page")
 def manual_label_page():
     return render_template("manual_label.html")
 
 
-
 if __name__ == "__main__":
+    print("🚀 API Server running with packets.db")
     app.run(host="0.0.0.0", port=5000, debug=True)
