@@ -39,11 +39,12 @@ def insert_parcel_api():
     data = request.get_json(force=True)
     provider = data.get("provider")
     digits = data.get("digits")
+    barcode = data.get("barcode")
 
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
-    result = insert_parcel(provider, digits)
+    result = insert_parcel(provider, digits, barcode)
     return jsonify(result)
 
 
