@@ -25,6 +25,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT,
             digits TEXT,
+            kode TEXT,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )

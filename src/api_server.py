@@ -115,21 +115,50 @@ def all_parcels():
 @app.route("/customer_entry", methods=["POST"])
 def customer_entry():
     data = request.get_json(force=True)
-    provider = data.get("provider")
-    digits = data.get("digits")
+    provider = (data.get("provider") or "").strip()
+    digits = (data.get("digits") or "").strip()
+    kode = (data.get("kode") or "").strip()
+
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
+    # Ensure kode column exists for older DBs
+    def ensure_kode_column(conn):
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(customer_entries)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'kode' not in cols:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN kode TEXT")
+            conn.commit()
+
     conn = sqlite3.connect("db/packets.db")
+    ensure_kode_column(conn)
     cursor = conn.cursor()
+
+    # Check if there's a matching packet (provider + digits) currently in shop
+    cursor.execute("SELECT COUNT(*) FROM packets WHERE provider=? AND digits=? AND status='in_shop'", (provider, digits))
+    matched = cursor.fetchone()[0] > 0
+
+    if not matched:
+        # No match -> inform customer (front-end should display red message)
+        conn.close()
+        return jsonify({"message": "No match found for those details.", "matched": False}), 200
+
+    # If provider is DAO, require a 5-digit numeric kode
+    if provider.upper() == 'DAO':
+        if not kode or not kode.isdigit() or len(kode) != 5:
+            conn.close()
+            return jsonify({"message": "DAO requires a 5-digit collection code.", "matched": True, "require_kode": True}), 200
+
+    # Save the customer entry including kode if provided
     cursor.execute("""
-    INSERT INTO customer_entries (provider, digits, status, created_at)
-    VALUES (?, ?, 'pending', datetime('now'))
-    """, (provider, digits))
+    INSERT INTO customer_entries (provider, digits, kode, status, created_at)
+    VALUES (?, ?, ?, 'pending', datetime('now'))
+    """, (provider, digits, kode if kode else None))
 
     conn.commit()
     conn.close()
-    return jsonify({"message": "Customer entry recorded."})
+    return jsonify({"message": "Customer entry recorded.", "matched": True})
 
 
 # ---------------------- CUSTOMER ENTRIES (auto-match + logging) ----------------------
