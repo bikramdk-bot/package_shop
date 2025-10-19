@@ -1,9 +1,56 @@
 from flask import Flask, request, jsonify, render_template
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel
-import sqlite3
+import sqlite3, os
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
+
+# Use the exact same DB path as other modules (lookup.py/db_manager.py)
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
+
+# ---------- SQLite helpers ----------
+def open_db():
+    """Open a SQLite connection configured for concurrent reads/writes."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    # Enable WAL for better concurrency and set timeouts
+    try:
+        c.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("PRAGMA foreign_keys=ON")
+    except sqlite3.OperationalError:
+        pass
+    return conn
+
+def run_migrations():
+    """One-time lightweight migrations: add missing columns if needed."""
+    conn = open_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("PRAGMA table_info(customer_entries)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'kode' not in cols:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN kode TEXT")
+        if 'collection_id' not in cols:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN collection_id TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # If locked during startup, ignore; next startup/run can add these.
+        pass
+    finally:
+        conn.close()
 
 # ---------------------- LOOKUP ----------------------
 @app.route("/lookup", methods=["GET", "POST"])
@@ -102,7 +149,7 @@ def dashboard():
 @app.route("/all_parcels")
 def all_parcels():
     """Return all packets in the DB."""
-    conn = sqlite3.connect("db/packets.db")
+    conn = open_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM packets ORDER BY scan_time DESC;")
@@ -118,26 +165,23 @@ def customer_entry():
     provider = (data.get("provider") or "").strip()
     digits = (data.get("digits") or "").strip()
     kode = (data.get("kode") or "").strip()
+    collection_id = (data.get("collection_id") or "").strip()
 
     if not provider or not digits:
         return jsonify({"error": "Missing provider or digits"}), 400
 
-    # Ensure kode column exists for older DBs
-    def ensure_kode_column(conn):
-        cur = conn.cursor()
-        cur.execute("PRAGMA table_info(customer_entries)")
-        cols = [r[1] for r in cur.fetchall()]
-        if 'kode' not in cols:
-            cur.execute("ALTER TABLE customer_entries ADD COLUMN kode TEXT")
-            conn.commit()
-
-    conn = sqlite3.connect("db/packets.db")
-    ensure_kode_column(conn)
+    conn = open_db()
     cursor = conn.cursor()
 
+    provider_upper = provider.upper()
+
     # Check if there's a matching packet (provider + digits) currently in shop
-    cursor.execute("SELECT COUNT(*) FROM packets WHERE provider=? AND digits=? AND status='in_shop'", (provider, digits))
-    matched = cursor.fetchone()[0] > 0
+    if provider_upper == 'UPS':
+        # UPS uses a 5-digit collection code; we accept the entry without requiring a packet match
+        matched = True
+    else:
+        cursor.execute("SELECT COUNT(*) FROM packets WHERE provider=? AND digits=? AND status='in_shop'", (provider, digits))
+        matched = cursor.fetchone()[0] > 0
 
     if not matched:
         # No match -> inform customer (front-end should display red message)
@@ -145,34 +189,97 @@ def customer_entry():
         return jsonify({"message": "No match found for those details.", "matched": False}), 200
 
     # If provider is DAO, require a 5-digit numeric kode
-    if provider.upper() == 'DAO':
+    if provider_upper == 'DAO':
         if not kode or not kode.isdigit() or len(kode) != 5:
             conn.close()
             return jsonify({"message": "DAO requires a 5-digit collection code.", "matched": True, "require_kode": True}), 200
 
     # Save the customer entry including kode if provided
     cursor.execute("""
-    INSERT INTO customer_entries (provider, digits, kode, status, created_at)
-    VALUES (?, ?, ?, 'pending', datetime('now'))
-    """, (provider, digits, kode if kode else None))
+    INSERT INTO customer_entries (provider, digits, kode, collection_id, status, created_at)
+    VALUES (?, ?, ?, ?, 'pending', datetime('now'))
+    """, (provider, digits, kode if kode else None, collection_id if collection_id else None))
+    entry_id = cursor.lastrowid
 
     conn.commit()
     conn.close()
-    return jsonify({"message": "Customer entry recorded.", "matched": True})
+    return jsonify({"message": "Customer entry recorded.", "matched": True, "entry_id": entry_id})
+
+
+# ---------------------- ASSIGN COLLECTION ID ----------------------
+@app.route("/assign_collection", methods=["POST"])
+def assign_collection():
+    data = request.get_json(force=True)
+    entry_ids = data.get("entry_ids") or []
+    collection_id = (data.get("collection_id") or "").strip()
+
+    if not isinstance(entry_ids, list) or len(entry_ids) == 0 or not collection_id:
+        return jsonify({"error": "Missing entry_ids or collection_id"}), 400
+
+    conn = open_db()
+    cursor = conn.cursor()
+
+    # First, set the collection_id for the specified entry ids
+    placeholders = ",".join(["?"] * len(entry_ids))
+    params = [collection_id] + entry_ids
+    cursor.execute(f"""
+        UPDATE customer_entries
+        SET collection_id = ?
+        WHERE id IN ({placeholders})
+    """, params)
+    updated = cursor.rowcount
+
+    # Then, propagate collection_id to matching group entries that are currently visible (not held)
+    # Non-UPS: provider+digits+kode match; UPS: provider='UPS' + digits match
+    # Derive all distinct groups represented by entry_ids and propagate per group.
+    cursor.execute(f"SELECT DISTINCT provider, digits, kode FROM customer_entries WHERE id IN ({placeholders})", entry_ids)
+    groups = cursor.fetchall()
+    for g in groups:
+        provider, digits, kode = g
+        if provider == 'UPS':
+            cursor.execute(
+                """
+                UPDATE customer_entries
+                SET collection_id = ?
+                WHERE collection_id IS NULL
+                  AND status != 'hold'
+                  AND provider = 'UPS'
+                  AND digits = ?
+                """,
+                (collection_id, digits)
+            )
+            updated += cursor.rowcount
+        else:
+            cursor.execute(
+                """
+                UPDATE customer_entries
+                SET collection_id = ?
+                WHERE collection_id IS NULL
+                  AND status != 'hold'
+                  AND provider = ?
+                  AND digits = ?
+                  AND ((kode IS NULL AND ? IS NULL) OR (kode = ?))
+                """,
+                (collection_id, provider, digits, kode, kode)
+            )
+            updated += cursor.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"updated": updated, "collection_id": collection_id})
 
 
 # ---------------------- CUSTOMER ENTRIES (auto-match + logging) ----------------------
 @app.route("/customer_entries")
 def get_customer_entries():
     """Fetch live customer entries, match vs packets, and clean + log all outcomes."""
-    conn = sqlite3.connect("db/packets.db")
+    conn = open_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     # 1️⃣ Identify expired (non-held) customer entries
     cursor.execute("""
         SELECT id, provider, digits FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
     """)
     expired = cursor.fetchall()
 
@@ -204,12 +311,71 @@ def get_customer_entries():
     # 3️⃣ Delete expired customer entries
     cursor.execute("""
         DELETE FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-120 seconds')
+        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
     """)
+    
+    # 3.5️⃣ Backfill collection_id for entries that share the same digits + kode (LCN)
+    # This ensures a constant collection_id is shown on the live page for the same group.
+    # Rule: If an entry has NULL collection_id but there exists another entry with the same
+    # provider + digits + kode that has a non-NULL collection_id, propagate that (prefer the earliest one).
+    try:
+        cursor.execute(
+            """
+            UPDATE customer_entries AS c
+            SET collection_id = (
+                SELECT c2.collection_id FROM customer_entries AS c2
+                WHERE c2.collection_id IS NOT NULL
+                  AND c2.kode IS NOT NULL
+                  AND c2.provider = c.provider
+                  AND c2.digits = c.digits
+                  AND c2.kode = c.kode
+                ORDER BY c2.created_at ASC
+                LIMIT 1
+            )
+            WHERE c.collection_id IS NULL
+              AND c.kode IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM customer_entries AS c2
+                WHERE c2.collection_id IS NOT NULL
+                  AND c2.kode IS NOT NULL
+                  AND c2.provider = c.provider
+                  AND c2.digits = c.digits
+                  AND c2.kode = c.kode
+              )
+            """
+        )
+
+        # UPS case: their 5-digit code is provided as 'digits' and kode is NULL.
+        # Propagate collection_id among UPS entries with the same digits.
+        cursor.execute(
+            """
+            UPDATE customer_entries AS c
+            SET collection_id = (
+                SELECT c2.collection_id FROM customer_entries AS c2
+                WHERE c2.collection_id IS NOT NULL
+                  AND c2.provider = 'UPS'
+                  AND c2.digits = c.digits
+                ORDER BY c2.created_at ASC
+                LIMIT 1
+            )
+            WHERE c.collection_id IS NULL
+              AND c.provider = 'UPS'
+              AND EXISTS (
+                SELECT 1 FROM customer_entries AS c2
+                WHERE c2.collection_id IS NOT NULL
+                  AND c2.provider = 'UPS'
+                  AND c2.digits = c.digits
+              )
+            """
+        )
+    except sqlite3.OperationalError:
+        # In case of a transient lock, skip this backfill for now
+        pass
 
     # 4️⃣ Fetch only *active* (non-held) entries for live view
     cursor.execute("""
-        SELECT * FROM customer_entries
+        SELECT id, provider, digits, kode, collection_id, status, created_at
+        FROM customer_entries
         WHERE status != 'hold'
         ORDER BY created_at DESC
     """)
@@ -243,7 +409,7 @@ def hold_entry():
     if not entry_id:
         return jsonify({"error": "Missing entry_id"}), 400
 
-    conn = sqlite3.connect("db/packets.db")
+    conn = open_db()
     cursor = conn.cursor()
 
     # Update customer entry to 'hold'
@@ -269,7 +435,7 @@ def hold_entry():
 # ---------------------- COLLECTED LOG ----------------------
 @app.route("/collected_log")
 def collected_log():
-    conn = sqlite3.connect("db/packets.db")
+    conn = open_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -300,5 +466,7 @@ def manual_label_page():
 
 
 if __name__ == "__main__":
+    # Run lightweight migrations once at startup to avoid ALTER TABLE during traffic
+    run_migrations()
     print("🚀 API Server running with packets.db")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

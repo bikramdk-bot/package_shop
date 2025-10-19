@@ -19,6 +19,7 @@
     <thead>
       <tr>
         <th>ID</th>
+        <th>Collection</th>
         <th>Provider</th>
         <th>Digits</th>
         <th>Status</th>
@@ -45,7 +46,7 @@ async function loadEntries() {
   for (const row of data) {
     const createdAt = new Date(row.created_at);
     const elapsed = (now - createdAt) / 1000;
-    const remaining = Math.max(0, 120 - elapsed);
+  const remaining = Math.max(0, 300 - elapsed);
 
     const tr = document.createElement('tr');
 
@@ -56,6 +57,7 @@ async function loadEntries() {
 
     tr.innerHTML = `
       <td>${row.id}</td>
+      <td>${row.collection_id ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
       <td>${row.matched ? 'MATCHED' : 'PENDING'}</td>
@@ -75,7 +77,7 @@ function updateCountdowns() {
   cells.forEach(cell => {
     const created = new Date(cell.dataset.created);
     const elapsed = (now - created) / 1000;
-    const remaining = Math.max(0, 120 - elapsed);
+  const remaining = Math.max(0, 300 - elapsed);
     cell.textContent = `${remaining.toFixed(0)}s`;
     cell.style.color =
       remaining <= 15 ? 'red' :
