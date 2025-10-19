@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Live Customer Entries</title>
+<title data-i18n="liveCustomersTitle">Live Customer Entries</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
   body { font-family: sans-serif; margin: 20px; }
@@ -10,20 +10,40 @@
   th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
   th { background: #f0f0f0; }
   .countdown { font-weight: bold; }
+  .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
+  .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
+  .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
+  .flag img { width: 28px; height: 20px; display: block; }
 </style>
 </head>
 <body>
-  <h2>👀 Live Customer Queue</h2>
+  <div class="flags">
+    <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
+      <img src="/static/flags/da.svg" alt="Dansk" />
+    </div>
+    <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}">
+      <img src="/static/flags/en.svg" alt="English" />
+    </div>
+    <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}">
+      <img src="/static/flags/de.svg" alt="Deutsch" />
+    </div>
+    <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}">
+      <img src="/static/flags/sv.svg" alt="Svenska" />
+    </div>
+  </div>
+  <h2 data-i18n="liveQueue">👀 Live Customer Queue</h2>
   {% include 'nav_bar.html' %}
   <table id="table">
     <thead>
       <tr>
-        <th>ID</th>
-        <th>Provider</th>
-        <th>Digits</th>
-        <th>Status</th>
-        <th>Countdown</th>
-        <th>Hold</th>
+        <th data-i18n="colId">ID</th>
+        <th data-i18n="colCollection">Collection</th>
+        <th data-i18n="colKode">Afhentningskode</th>
+        <th data-i18n="colProvider">Provider</th>
+        <th data-i18n="colDigits">Digits</th>
+        <th data-i18n="colStatus">Status</th>
+        <th data-i18n="colCountdown">Countdown</th>
+        <th data-i18n="btnHold">Hold</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -45,7 +65,8 @@ async function loadEntries() {
   for (const row of data) {
     const createdAt = new Date(row.created_at);
     const elapsed = (now - createdAt) / 1000;
-    const remaining = Math.max(0, 120 - elapsed);
+    // Prefer server-computed remaining (hold-aware). Fallback to naive calc.
+    const remaining = Math.max(0, typeof row.remaining === 'number' ? row.remaining : (300 - elapsed));
 
     const tr = document.createElement('tr');
 
@@ -54,15 +75,26 @@ async function loadEntries() {
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
 
+    const statusText = row.held
+      ? (i18n?.[currentLang]?.statusPaused || 'PAUSED')
+      : (row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING'));
+
+    const holdBtnLabel = i18n?.[currentLang]?.btnHold || 'Hold';
+    const resolveBtnLabel = i18n?.[currentLang]?.btnResolve || 'Resolve';
+
     tr.innerHTML = `
       <td>${row.id}</td>
+      <td>${row.collection_id ?? ''}</td>
+      <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${row.matched ? 'MATCHED' : 'PENDING'}</td>
-      <td class="countdown" data-created="${row.created_at}" style="color:${color}">
-        ${remaining.toFixed(0)}s
+      <td>${statusText}</td>
+      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
+      <td>
+        ${row.held
+          ? `<button onclick="resolvePrompt(${row.id})">${resolveBtnLabel}</button>`
+          : `<button onclick="hold(${row.id})">${holdBtnLabel}</button>`}
       </td>
-      <td><button onclick="hold(${row.id})">Hold</button></td>
     `;
 
     tbody.appendChild(tr);
@@ -71,12 +103,14 @@ async function loadEntries() {
 
 function updateCountdowns() {
   const cells = document.querySelectorAll('.countdown');
-  const now = new Date();
   cells.forEach(cell => {
-    const created = new Date(cell.dataset.created);
-    const elapsed = (now - created) / 1000;
-    const remaining = Math.max(0, 120 - elapsed);
-    cell.textContent = `${remaining.toFixed(0)}s`;
+    const held = cell.dataset.held === '1';
+    let remaining = parseInt(cell.dataset.remaining || '0', 10);
+    if (!held && remaining > 0) {
+      remaining -= 1;
+      cell.dataset.remaining = String(remaining);
+    }
+    cell.textContent = `${remaining}s`;
     cell.style.color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
@@ -92,10 +126,58 @@ async function hold(id) {
   loadEntries(); // refresh after hold
 }
 
+function resolvePrompt(id){
+  const message = (i18n?.[currentLang]?.confirmCollected || 'Mark as Collected?\nPress Cancel to Keep in Shop.');
+  const choice = window.confirm(message);
+  if (choice) {
+    resolve(id, 'collected');
+  } else {
+    resolve(id, 'keep');
+  }
+}
+
+async function resolve(id, action){
+  await fetch('/resolve_entry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entry_id: id, action })
+  });
+  loadEntries();
+}
+
 // refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);
 setInterval(updateCountdowns, 1000);
-loadEntries();
+// --- i18n for staff page ---
+let i18n = null; let currentLang = 'da';
+async function loadTranslations() {
+  try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+}
+function applyI18n() {
+  if (!i18n) return;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const txt = i18n[currentLang]?.[key];
+    if (txt) el.textContent = txt;
+  });
+  document.documentElement.lang = currentLang;
+}
+function updateLanguage(lang){
+  currentLang = lang;
+  document.querySelectorAll('.flags .flag').forEach(el => {
+    const active = el.dataset.lang === lang;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  applyI18n();
+}
+
+(async function init(){
+  await loadTranslations();
+  applyI18n();
+  updateLanguage(currentLang);
+  loadEntries();
+})();
 </script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 <!-- templates/manual_label.html -->
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Manual Label</title>
+  <title data-i18n="manualLabelTitle">Manual Label</title>
   <style>
     body { 
       font-family: sans-serif; 
@@ -30,17 +30,62 @@
 
   {% include 'nav_bar.html' %}
 
-  <h2>🏷️ Manual Label Printing</h2>
+  <div class="flags" style="position: fixed; bottom: 10px; right: 10px; display:flex; gap:8px;">
+    <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}" style="width:40px;height:28px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.12);display:inline-flex;align-items:center;justify-content:center;background:#fff;">
+      <img src="/static/flags/da.svg" alt="Dansk" style="width:28px;height:20px;display:block;" />
+    </div>
+    <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}" style="width:40px;height:28px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.12);display:inline-flex;align-items:center;justify-content:center;background:#fff;">
+      <img src="/static/flags/en.svg" alt="English" style="width:28px;height:20px;display:block;" />
+    </div>
+    <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}" style="width:40px;height:28px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.12);display:inline-flex;align-items:center;justify-content:center;background:#fff;">
+      <img src="/static/flags/de.svg" alt="Deutsch" style="width:28px;height:20px;display:block;" />
+    </div>
+    <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}" style="width:40px;height:28px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.12);display:inline-flex;align-items:center;justify-content:center;background:#fff;">
+      <img src="/static/flags/sv.svg" alt="Svenska" style="width:28px;height:20px;display:block;" />
+    </div>
+  </div>
+
+  <h2 data-i18n="manualLabelHeading">🏷️ Manual Label Printing</h2>
 
   <form id="manualForm">
-    <input type="text" id="lcn" placeholder="LCN (e.g. PostNord)" required><br>
-    <input type="text" id="digits" placeholder="Last 4 digits" required><br>
-    <button type="submit">Send to Printer</button>
+    <input type="text" id="lcn" placeholder="LCN (e.g. PostNord)" aria-label="LCN" required><br>
+    <input type="text" id="digits" placeholder="Last 4 digits" aria-label="Last 4 digits" required><br>
+    <button type="submit" data-i18n="sendToPrinter">Send to Printer</button>
   </form>
 
   <p id="status" style="font-size:18px;color:green;margin-top:10px;"></p>
 
   <script>
+    // i18n for manual label page
+    let i18n = null; let currentLang = 'da';
+    async function loadTranslations() {
+      try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+    }
+    function applyI18n() {
+      if (!i18n) return;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const txt = i18n[currentLang]?.[key];
+        if (txt) el.textContent = txt;
+      });
+      document.documentElement.lang = currentLang;
+    }
+    function updateLanguage(lang){
+      currentLang = lang;
+      document.querySelectorAll('.flags .flag').forEach(el => {
+        const active = el.dataset.lang === lang;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      applyI18n();
+    }
+
+    (async function init(){
+      await loadTranslations();
+      applyI18n();
+      updateLanguage(currentLang);
+    })();
+
     document.getElementById('manualForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const lcn = document.getElementById('lcn').value.trim();
@@ -55,10 +100,10 @@
       const data = await res.json();
       const msg = document.getElementById('status');
       if (data.status) {
-        msg.textContent = '✅ Label sent successfully!';
+        msg.textContent = (i18n?.[currentLang]?.labelSent)||'✅ Label sent successfully!';
         msg.style.color = 'green';
       } else {
-        msg.textContent = '❌ ' + (data.error || 'Failed to send label');
+        msg.textContent = '❌ ' + (data.error || (i18n?.[currentLang]?.labelFailed)||'Failed to send label');
         msg.style.color = 'red';
       }
       setTimeout(() => msg.textContent = '', 3000);

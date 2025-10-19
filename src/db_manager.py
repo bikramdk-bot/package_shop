@@ -26,6 +26,7 @@ def init_db():
             provider TEXT,
             digits TEXT,
             kode TEXT,
+            collection_id TEXT,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )

@@ -2,33 +2,146 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Staff Parcel Dashboard</title>
+  <title data-i18n="staffDashTitle">Staff Parcel Dashboard</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+  .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
+    .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
+    .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
+    .flag img { width: 28px; height: 20px; display: block; }
+  </style>
 </head>
 <body>
+  <div class="flags">
+    <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
+      <img src="/static/flags/da.svg" alt="Dansk" />
+    </div>
+    <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}">
+      <img src="/static/flags/en.svg" alt="English" />
+    </div>
+    <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}">
+      <img src="/static/flags/de.svg" alt="Deutsch" />
+    </div>
+    <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}">
+      <img src="/static/flags/sv.svg" alt="Svenska" />
+    </div>
+  </div>
+
   {% include 'nav_bar.html' %}
-  <h2>📦 Parcels in Shop</h2>
+  <h2 data-i18n="parcelsInShop">📦 Parcels in Shop</h2>
+  <div id="addPacket" style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <strong data-i18n="addPacket">➕ Add Packet</strong>
+    <label data-i18n="inputProvider">Provider</label>
+    <select id="addProvider">
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="inputDigits">Digits</label>
+    <input id="addDigits" type="text" placeholder="123456" style="width:120px;">
+    <label data-i18n="inputBarcode">Barcode</label>
+    <input id="addBarcode" type="text" placeholder="optional" style="width:180px;">
+    <button onclick="addPacket()" data-i18n="btnAdd">Add</button>
+    <span id="addStatus" style="margin-left:8px;color:#555;"></span>
+  </div>
+  <div style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label data-i18n="filterProvider">Provider</label>
+    <select id="filterProvider">
+      <option value="" selected data-i18n="all">All</option>
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="filterStatus">Status</label>
+    <select id="filterStatus">
+      <option value="" selected data-i18n="all">All</option>
+      <option value="in_shop">in_shop</option>
+      <option value="collected">collected</option>
+      <option value="held">held</option>
+    </select>
+    <label data-i18n="sortBy">Sort</label>
+    <select id="sortBy">
+      <option value="time_desc" selected data-i18n="sortTimeDesc">Newest</option>
+      <option value="time_asc" data-i18n="sortTimeAsc">Oldest</option>
+      <option value="provider_asc" data-i18n="sortProviderAsc">Provider A-Z</option>
+      <option value="provider_desc" data-i18n="sortProviderDesc">Provider Z-A</option>
+    </select>
+  </div>
 
   <table id="parcelTable">
     <thead>
       <tr>
-        <th>ID</th>
-        <th>Provider</th>
-        <th>Digits</th>
-        <th>Barcode</th>
-        <th>Status</th>
-        <th>Actions</th>
+  <th data-i18n="colId">ID</th>
+  <th data-i18n="colProvider">Provider</th>
+  <th data-i18n="colDigits">Digits</th>
+  <th data-i18n="colBarcode">Barcode</th>
+  <th data-i18n="colStatus">Status</th>
+  <th data-i18n="colActions">Actions</th>
       </tr>
     </thead>
     <tbody></tbody>
   </table>
 
   <script>
+  let cache = [];
   async function loadParcels() {
     const res = await fetch('/all_parcels');
+    cache = await res.json();
+    render();
+  }
+
+  async function addPacket(){
+    const provider = document.getElementById('addProvider').value.trim();
+    const digits = document.getElementById('addDigits').value.trim();
+    const barcode = document.getElementById('addBarcode').value.trim();
+    const status = document.getElementById('addStatus');
+    status.textContent = '';
+    if(!provider || !digits){
+      status.textContent = 'Missing provider/digits';
+      status.style.color = 'red';
+      return;
+    }
+    const res = await fetch('/insert', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({provider, digits, barcode})
+    });
     const data = await res.json();
+    if(res.ok){
+      status.textContent = data.message || 'Inserted';
+      status.style.color = 'green';
+      document.getElementById('addDigits').value = '';
+      document.getElementById('addBarcode').value = '';
+      loadParcels();
+    }else{
+      status.textContent = data.warning || data.error || 'Failed';
+      status.style.color = 'red';
+    }
+  }
+
+  function render(){
     const tbody = document.querySelector('#parcelTable tbody');
     tbody.innerHTML = '';
+    const fp = document.getElementById('filterProvider').value;
+    const fs = document.getElementById('filterStatus').value;
+    const sort = document.getElementById('sortBy').value;
+
+    let data = cache.slice();
+    if (fp) data = data.filter(r=>r.provider===fp);
+    if (fs) data = data.filter(r=>r.status===fs);
+
+    const cmp = {
+      time_desc:(a,b)=> new Date(b.scan_time)-new Date(a.scan_time),
+      time_asc:(a,b)=> new Date(a.scan_time)-new Date(b.scan_time),
+      provider_asc:(a,b)=> (a.provider||'').localeCompare(b.provider||''),
+      provider_desc:(a,b)=> (b.provider||'').localeCompare(a.provider||'')
+    };
+    data.sort(cmp[sort]||cmp.time_desc);
+
     data.forEach(row => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -38,8 +151,8 @@
         <td>${row.barcode || ''}</td>
         <td>${row.status}</td>
         <td>
-          <button onclick="updateStatus('${row.provider}', '${row.digits}', 'collected')">✅ Collected</button>
-          <button onclick="deleteParcel('${row.provider}', '${row.digits}')">🗑️ Delete</button>
+          <button data-i18n="btnCollected" onclick="updateStatus('${row.provider}', '${row.digits}', 'collected')">✅ Collected</button>
+          <button data-i18n="btnDelete" onclick="deleteParcel('${row.provider}', '${row.digits}')">🗑️ Delete</button>
         </td>`;
       tbody.appendChild(tr);
     });
@@ -63,7 +176,40 @@
     loadParcels();
   }
 
-  loadParcels();
+  // --- i18n for staff page ---
+  let i18n = null; let currentLang = 'da';
+  async function loadTranslations() {
+    try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+  }
+  function applyI18n() {
+    if (!i18n) return;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.getAttribute('data-i18n');
+      const txt = i18n[currentLang]?.[key];
+      if (txt) el.textContent = txt;
+    });
+    document.documentElement.lang = currentLang;
+  }
+  function updateLanguage(lang){
+    currentLang = lang;
+    document.querySelectorAll('.flags .flag').forEach(el => {
+      const active = el.dataset.lang === lang;
+      el.classList.toggle('active', active);
+      el.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    applyI18n();
+  }
+
+  (async function init(){
+    await loadTranslations();
+    applyI18n();
+    updateLanguage(currentLang);
+    // Wire filters/sort to re-render client-side without refetching
+    document.getElementById('filterProvider').addEventListener('change', render);
+    document.getElementById('filterStatus').addEventListener('change', render);
+    document.getElementById('sortBy').addEventListener('change', render);
+    loadParcels();
+  })();
   </script>
 </body>
 </html>

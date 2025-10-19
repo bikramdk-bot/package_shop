@@ -3,40 +3,142 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Collected Log</title>
+  <title data-i18n="logTitle">Collected Log</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     table { width: 100%; border-collapse: collapse; margin-top: 60px; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     th { background-color: #f2f2f2; }
+  .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
+    .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
+    .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
+    .flag img { width: 28px; height: 20px; display: block; }
   </style>
 </head>
 <body>
+  <div class="flags">
+    <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
+      <img src="/static/flags/da.svg" alt="Dansk" />
+    </div>
+    <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}">
+      <img src="/static/flags/en.svg" alt="English" />
+    </div>
+    <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}">
+      <img src="/static/flags/de.svg" alt="Deutsch" />
+    </div>
+    <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}">
+      <img src="/static/flags/sv.svg" alt="Svenska" />
+    </div>
+  </div>
   {% include 'nav_bar.html' %}
-  <h2>🗒️ Collected / Held / Expired Parcels</h2>
+  <h2 data-i18n="logHeading">🗒️ Collected / Held / Expired Parcels</h2>
+  <div style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label data-i18n="filterProvider">Provider</label>
+    <select id="filterProvider">
+      <option value="" selected data-i18n="all">All</option>
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="filterType">Type</label>
+    <select id="filterType">
+      <option value="" selected data-i18n="all">All</option>
+      <option value="collected">collected</option>
+      <option value="collected_staff">collected_staff</option>
+      <option value="held">held</option>
+      <option value="expired_unmatched">expired_unmatched</option>
+    </select>
+    <label data-i18n="sortBy">Sort</label>
+    <select id="sortBy">
+      <option value="time_desc" selected data-i18n="sortTimeDesc">Newest</option>
+      <option value="time_asc" data-i18n="sortTimeAsc">Oldest</option>
+      <option value="provider_asc" data-i18n="sortProviderAsc">Provider A-Z</option>
+      <option value="provider_desc" data-i18n="sortProviderDesc">Provider Z-A</option>
+      <option value="type_asc" data-i18n="sortTypeAsc">Type A-Z</option>
+      <option value="type_desc" data-i18n="sortTypeDesc">Type Z-A</option>
+    </select>
+  </div>
 
   <table>
     <thead>
       <tr>
-        <th>Provider</th>
-        <th>Digits</th>
-        <th>Barcode</th>
-        <th>Type</th>
-        <th>Time</th>
+        <th data-i18n="colProvider">Provider</th>
+        <th data-i18n="colDigits">Digits</th>
+        <th data-i18n="colBarcode">Barcode</th>
+        <th data-i18n="colType">Type</th>
+        <th data-i18n="colTime">Time</th>
       </tr>
     </thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>{{ r['provider'] }}</td>
-        <td>{{ r['digits'] }}</td>
-        <td>{{ r['barcode'] }}</td>
-        <td>{{ r['log_type'] }}</td>
-        <td>{{ r['collected_at'] }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="logBody"></tbody>
   </table>
+
+  <script>
+    async function loadLog(){
+      const res = await fetch('/collected_log_data');
+      let data = await res.json();
+      const fp = document.getElementById('filterProvider').value;
+      const ft = document.getElementById('filterType').value;
+      const sort = document.getElementById('sortBy').value;
+
+      if (fp) data = data.filter(r=>r.provider===fp);
+      if (ft) data = data.filter(r=>r.log_type===ft);
+
+      const cmp = {
+        time_desc:(a,b)=> new Date(b.collected_at)-new Date(a.collected_at),
+        time_asc:(a,b)=> new Date(a.collected_at)-new Date(b.collected_at),
+        provider_asc:(a,b)=> (a.provider||'').localeCompare(b.provider||''),
+        provider_desc:(a,b)=> (b.provider||'').localeCompare(a.provider||''),
+        type_asc:(a,b)=> (a.log_type||'').localeCompare(b.log_type||''),
+        type_desc:(a,b)=> (b.log_type||'').localeCompare(a.log_type||'')
+      };
+      data.sort(cmp[sort]||cmp.time_desc);
+
+      const tbody = document.getElementById('logBody');
+      tbody.innerHTML = '';
+      for(const r of data){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.provider}</td><td>${r.digits??''}</td><td>${r.barcode??''}</td><td>${r.log_type}</td><td>${r.collected_at}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+    document.getElementById('filterProvider').addEventListener('change', loadLog);
+    document.getElementById('filterType').addEventListener('change', loadLog);
+    document.getElementById('sortBy').addEventListener('change', loadLog);
+    loadLog();
+  </script>
+
+  <script>
+    // i18n for staff log page
+    let i18n = null; let currentLang = 'da';
+    async function loadTranslations() {
+      try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+    }
+    function applyI18n() {
+      if (!i18n) return;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const txt = i18n[currentLang]?.[key];
+        if (txt) el.textContent = txt;
+      });
+      document.documentElement.lang = currentLang;
+    }
+    function updateLanguage(lang){
+      currentLang = lang;
+      document.querySelectorAll('.flags .flag').forEach(el => {
+        const active = el.dataset.lang === lang;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      applyI18n();
+    }
+    (async function init(){
+      await loadTranslations();
+      applyI18n();
+      updateLanguage(currentLang);
+    })();
+  </script>
 </body>
 </html>
