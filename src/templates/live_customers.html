@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Live Customer Entries</title>
+<title data-i18n="liveCustomersTitle">Live Customer Entries</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
   body { font-family: sans-serif; margin: 20px; }
@@ -10,22 +10,40 @@
   th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
   th { background: #f0f0f0; }
   .countdown { font-weight: bold; }
+  .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
+  .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
+  .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
+  .flag img { width: 28px; height: 20px; display: block; }
 </style>
 </head>
 <body>
-  <h2>👀 Live Customer Queue</h2>
+  <div class="flags">
+    <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
+      <img src="/static/flags/da.svg" alt="Dansk" />
+    </div>
+    <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}">
+      <img src="/static/flags/en.svg" alt="English" />
+    </div>
+    <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}">
+      <img src="/static/flags/de.svg" alt="Deutsch" />
+    </div>
+    <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}">
+      <img src="/static/flags/sv.svg" alt="Svenska" />
+    </div>
+  </div>
+  <h2 data-i18n="liveQueue">👀 Live Customer Queue</h2>
   {% include 'nav_bar.html' %}
   <table id="table">
     <thead>
       <tr>
-        <th>ID</th>
-        <th>Collection</th>
-        <th>Afhentningskode</th>
-        <th>Provider</th>
-        <th>Digits</th>
-        <th>Status</th>
-        <th>Countdown</th>
-        <th>Hold</th>
+        <th data-i18n="colId">ID</th>
+        <th data-i18n="colCollection">Collection</th>
+        <th data-i18n="colKode">Afhentningskode</th>
+        <th data-i18n="colProvider">Provider</th>
+        <th data-i18n="colDigits">Digits</th>
+        <th data-i18n="colStatus">Status</th>
+        <th data-i18n="colCountdown">Countdown</th>
+        <th data-i18n="btnHold">Hold</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -62,11 +80,11 @@ async function loadEntries() {
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${row.matched ? 'MATCHED' : 'PENDING'}</td>
+      <td>${row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING')}</td>
       <td class="countdown" data-created="${row.created_at}" style="color:${color}">
         ${remaining.toFixed(0)}s
       </td>
-      <td><button onclick="hold(${row.id})">Hold</button></td>
+      <td><button data-i18n="btnHold" onclick="hold(${row.id})">Hold</button></td>
     `;
 
     tbody.appendChild(tr);
@@ -99,7 +117,36 @@ async function hold(id) {
 // refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);
 setInterval(updateCountdowns, 1000);
-loadEntries();
+// --- i18n for staff page ---
+let i18n = null; let currentLang = 'da';
+async function loadTranslations() {
+  try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+}
+function applyI18n() {
+  if (!i18n) return;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const txt = i18n[currentLang]?.[key];
+    if (txt) el.textContent = txt;
+  });
+  document.documentElement.lang = currentLang;
+}
+function updateLanguage(lang){
+  currentLang = lang;
+  document.querySelectorAll('.flags .flag').forEach(el => {
+    const active = el.dataset.lang === lang;
+    el.classList.toggle('active', active);
+    el.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  applyI18n();
+}
+
+(async function init(){
+  await loadTranslations();
+  applyI18n();
+  updateLanguage(currentLang);
+  loadEntries();
+})();
 </script>
 </body>
 </html>
