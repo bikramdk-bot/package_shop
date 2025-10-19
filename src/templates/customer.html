@@ -45,9 +45,13 @@
     }
     .flags { display: flex; gap: 8px; }
     .flag {
-      width: 36px; height: 24px; border-radius: 4px; cursor: pointer; box-shadow: var(--shadow);
-      display: inline-flex; align-items: center; justify-content: center; font-size: 16px; user-select: none;
+      width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: var(--shadow);
+      display: inline-flex; align-items: center; justify-content: center; user-select: none;
+      background: #fff;
     }
+    .flag.active { outline: 3px solid var(--primary); outline-offset: 2px; }
+    .flag:focus { outline: 3px solid var(--primary); outline-offset: 2px; }
+    .flag img { width: 28px; height: 20px; display: block; }
     .title { font-weight: 700; letter-spacing: 0.5px; }
 
     /* Main content */
@@ -117,10 +121,18 @@
   <div class="page">
     <div class="topbar">
       <div class="flags">
-        <div class="flag" title="Dansk" onclick="updateLanguage('da')">🇩🇰</div>
-        <div class="flag" title="English" onclick="updateLanguage('en')">🇬🇧</div>
-        <div class="flag" title="Deutsch" onclick="updateLanguage('de')">🇩🇪</div>
-        <div class="flag" title="Svenska" onclick="updateLanguage('sv')">🇸🇪</div>
+        <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
+          <img src="/static/flags/da.svg" alt="Dansk" />
+        </div>
+        <div class="flag" data-lang="en" title="English" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('en')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('en'); event.preventDefault();}">
+          <img src="/static/flags/en.svg" alt="English" />
+        </div>
+        <div class="flag" data-lang="de" title="Deutsch" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('de')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('de'); event.preventDefault();}">
+          <img src="/static/flags/de.svg" alt="Deutsch" />
+        </div>
+        <div class="flag" data-lang="sv" title="Svenska" role="button" aria-pressed="false" tabindex="0" onclick="updateLanguage('sv')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('sv'); event.preventDefault();}">
+          <img src="/static/flags/sv.svg" alt="Svenska" />
+        </div>
       </div>
       <div class="title" data-i18n="headline">Indtast dine afhentningsoplysninger</div>
       <div style="width:120px"></div>
@@ -190,7 +202,16 @@
       });
       document.documentElement.lang = currentLang;
     }
-    function updateLanguage(lang) { currentLang = lang; applyI18n(); }
+    function updateLanguage(lang) {
+      currentLang = lang;
+      // toggle active state for flags
+      document.querySelectorAll('.flags .flag').forEach(el => {
+        const active = el.dataset.lang === lang;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      applyI18n();
+    }
 
     // --- Provider tiles ---
     const providersCfg = [
@@ -508,7 +529,8 @@
     (async function init(){
       await loadTranslations();
       renderProviders();
-      applyI18n();
+      // ensure flags reflect current language
+      updateLanguage(currentLang);
     })();
   </script>
 </body>
