@@ -733,6 +733,66 @@ def create_customer_entry():
 @app.route("/assign_collection", methods=["POST"])
 def assign_collection():
     data = request.get_json(force=True)
+    entry_ids = data.get("entry_ids")
+    provided_cid = (data.get("collection_id") or "").strip() or None
+
+    # Case 1: Assign by explicit entry_ids (preferred when customer clicks "No, finish")
+    if entry_ids:
+        if not isinstance(entry_ids, list) or len(entry_ids) == 0:
+            return jsonify({"error": "entry_ids must be a non-empty list"}), 400
+        conn = open_db()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        # Determine collection id (use provided or generate)
+        if provided_cid:
+            collection_id = provided_cid
+        else:
+            cur.execute("SELECT strftime('%Y%m%d%H%M%S','now')")
+            base = cur.fetchone()[0]
+            collection_id = f"C{base}"
+
+        # Fetch entries for grouping and update all matching groups to share same collection_id
+        placeholders = ",".join(["?"] * len(entry_ids))
+        cur.execute(
+            f"""
+            SELECT id, provider, digits, kode, collection_id
+            FROM customer_entries
+            WHERE id IN ({placeholders})
+            """,
+            entry_ids,
+        )
+        rows = cur.fetchall()
+        updated = 0
+        # Group by provider+kode for UPS/Bring, else provider+digits(+kode)
+        for r in rows:
+            prov = r["provider"]
+            digs = r["digits"]
+            kode = r["kode"]
+            if prov in ("UPS", "Bring") and kode:
+                cur.execute(
+                    """
+                    UPDATE customer_entries
+                    SET collection_id=?
+                    WHERE provider=? AND kode=?
+                    """,
+                    (collection_id, prov, kode),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE customer_entries
+                    SET collection_id=?
+                    WHERE provider=? AND digits=?
+                      AND ((kode IS NULL AND ? IS NULL) OR kode=?)
+                    """,
+                    (collection_id, prov, digs, kode, kode),
+                )
+            updated += cur.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"updated": updated, "collection_id": collection_id})
+
+    # Case 2: Backward-compatible assignment by provider/digits/kode
     provider = (data.get("provider") or "").strip()
     digits = (data.get("digits") or "").strip()
     kode = (data.get("kode") or "").strip() or None
@@ -769,12 +829,10 @@ def assign_collection():
     if row and row["collection_id"]:
         collection_id = row["collection_id"]
     else:
-        # Generate a simple collection id
         cur.execute("SELECT strftime('%Y%m%d%H%M%S','now')")
         base = cur.fetchone()[0]
         collection_id = f"C{base}"
 
-    # Update group with collection_id
     if provider in ("UPS", "Bring"):
         cur.execute(
             """

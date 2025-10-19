@@ -381,8 +381,9 @@
         return;
       }
 
-  // success -> store entry id and prompt if more
-  if (data.entry_id && !entryIds.includes(data.entry_id)) entryIds.push(data.entry_id);
+  // success -> store entry id and prompt if more (support both 'id' and legacy 'entry_id')
+  const newId = (typeof data.id !== 'undefined') ? data.id : data.entry_id;
+  if (newId && !entryIds.includes(newId)) entryIds.push(newId);
   const finalInfo = document.getElementById('finalInfo');
   if (finalInfo) finalInfo.style.display = 'none';
   document.getElementById('doneOverlay').classList.add('show');
