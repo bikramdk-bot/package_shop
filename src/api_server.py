@@ -544,28 +544,19 @@ def resolve_entry():
         return jsonify({"error": "Entry not found"}), 404
 
     if action == 'keep':
-        # Resume timer from where it left
-        c2 = conn.cursor()
-        c2.execute("SELECT hold_started_at, COALESCE(hold_accumulated,0) FROM customer_entries WHERE id=?", (entry_id,))
-        hold_started_at, hold_accumulated = c2.fetchone()
-        add_secs = 0
-        if hold_started_at:
-            try:
-                started = datetime.strptime(hold_started_at, "%Y-%m-%d %H:%M:%S")
-                add_secs = int((datetime.utcnow() - started).total_seconds())
-            except Exception:
-                add_secs = 0
+        # Remove the live entry and keep packet in shop (no auto-expiry will act without an entry)
+        # Log the decision
         cursor.execute(
             """
-            UPDATE customer_entries
-            SET status='pending', hold_started_at=NULL, hold_accumulated=COALESCE(hold_accumulated,0)+?
-            WHERE id=?
+            INSERT INTO collected_log (provider, digits, log_type)
+            SELECT provider, digits, 'kept' FROM customer_entries WHERE id=?
             """,
-            (add_secs, entry_id),
+            (entry_id,)
         )
+        cursor.execute("DELETE FROM customer_entries WHERE id=?", (entry_id,))
         conn.commit()
         conn.close()
-        return jsonify({"message": f"Entry {entry_id} kept in shop."})
+        return jsonify({"message": f"Entry {entry_id} kept in shop and removed from live."})
 
     # collected: try to log and delete packet if present, then remove entry
     provider = entry["provider"]
