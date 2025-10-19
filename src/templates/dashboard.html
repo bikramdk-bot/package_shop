@@ -164,9 +164,6 @@
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({provider, digits, status})
     });
-    document.getElementById('filterProvider').addEventListener('change', render);
-    document.getElementById('filterStatus').addEventListener('change', render);
-    document.getElementById('sortBy').addEventListener('change', render);
     loadParcels();
   }
 
@@ -207,6 +204,10 @@
     await loadTranslations();
     applyI18n();
     updateLanguage(currentLang);
+    // Wire filters/sort to re-render client-side without refetching
+    document.getElementById('filterProvider').addEventListener('change', render);
+    document.getElementById('filterStatus').addEventListener('change', render);
+    document.getElementById('sortBy').addEventListener('change', render);
     loadParcels();
   })();
   </script>

@@ -59,7 +59,15 @@
     "inputProvider": "Udbyder",
     "inputDigits": "Cifre",
     "inputBarcode": "Stregkode",
-    "btnAdd": "Tilføj"
+  "btnAdd": "Tilføj",
+    "filterProvider": "Udbyder",
+    "filterStatus": "Status",
+    "sortBy": "Sortér",
+    "sortTimeDesc": "Nyeste",
+    "sortTimeAsc": "Ældste",
+    "sortProviderAsc": "Udbyder A-Å",
+    "sortProviderDesc": "Udbyder Å-A",
+    "all": "Alle"
   },
   "en": {
     "title": "Customer Check-in",
@@ -121,7 +129,15 @@
     "inputProvider": "Provider",
     "inputDigits": "Digits",
     "inputBarcode": "Barcode",
-    "btnAdd": "Add"
+  "btnAdd": "Add",
+    "filterProvider": "Provider",
+    "filterStatus": "Status",
+    "sortBy": "Sort",
+    "sortTimeDesc": "Newest",
+    "sortTimeAsc": "Oldest",
+    "sortProviderAsc": "Provider A-Z",
+    "sortProviderDesc": "Provider Z-A",
+    "all": "All"
   },
   "de": {
     "title": "Kunden-Check-in",
@@ -183,7 +199,15 @@
     "inputProvider": "Anbieter",
     "inputDigits": "Ziffern",
     "inputBarcode": "Barcode",
-    "btnAdd": "Hinzufügen"
+  "btnAdd": "Hinzufügen",
+    "filterProvider": "Anbieter",
+    "filterStatus": "Status",
+    "sortBy": "Sortieren",
+    "sortTimeDesc": "Neueste",
+    "sortTimeAsc": "Älteste",
+    "sortProviderAsc": "Anbieter A-Z",
+    "sortProviderDesc": "Anbieter Z-A",
+    "all": "Alle"
   },
   "sv": {
     "title": "Kundincheckning",
@@ -245,6 +269,14 @@
     "inputProvider": "Leverantör",
     "inputDigits": "Siffror",
     "inputBarcode": "Streckkod",
-    "btnAdd": "Lägg till"
+  "btnAdd": "Lägg till",
+    "filterProvider": "Leverantör",
+    "filterStatus": "Status",
+    "sortBy": "Sortera",
+    "sortTimeDesc": "Nyast",
+    "sortTimeAsc": "Äldst",
+    "sortProviderAsc": "Leverantör A-Ö",
+    "sortProviderDesc": "Leverantör Ö-A",
+    "all": "Alla"
   }
 }
