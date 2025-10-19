@@ -245,13 +245,17 @@
       inputDigits = '';
       document.getElementById('message').textContent = '';
   if (selectedProvider === 'DAO') targetLen = 4; // start with last 4 to find packet; kode asked later
-  else if (selectedProvider === 'Bring') targetLen = 6; // variable; start at 6
+  else if (selectedProvider === 'Bring') targetLen = 5; // Bring asks 5-digit afhentningskode directly
   else if (selectedProvider === 'UPS') targetLen = 5; // UPS asks 5-digit collection code directly
   else targetLen = 4; // PostNord/GLS start with 4
       renderInputBoxes(targetLen, p.color);
       focusActiveBox();
-      document.getElementById('prompt').textContent =
-        (i18n?.[currentLang]?.promptDigits) || 'Indtast cifre';
+      // Set a clearer prompt for UPS/Bring 5-digit code entry
+      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+        document.getElementById('prompt').textContent = 'Indtast 5-cifret afhentningskode';
+      } else {
+        document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptDigits) || 'Indtast cifre';
+      }
     }
 
     // --- Digit boxes ---
@@ -304,8 +308,8 @@
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
 
-      // UPS: bypass lookup match requirement, treat 5 digits as collection code directly
-      if (selectedProvider === 'UPS') {
+      // UPS/Bring: bypass lookup match requirement, treat 5 digits as collection code directly
+      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
         if (inputDigits.length !== 5) { const m=document.getElementById('message'); m.className='msg error'; m.textContent=(i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
         await submitCustomerEntry(inputDigits);
         return;
@@ -337,7 +341,14 @@
     }
 
     async function submitCustomerEntry(kode) {
-      const payload = { provider: selectedProvider, digits: inputDigits };
+      const payload = { provider: selectedProvider };
+      // For UPS/Bring, send kode and omit digits; otherwise send digits and kode if present
+      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+        payload.kode = kode;
+      } else {
+        payload.digits = inputDigits;
+        if (kode) payload.kode = kode;
+      }
       if (kode) payload.kode = kode;
       const res = await fetch('/customer_entry', {
         method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload)

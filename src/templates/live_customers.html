@@ -20,6 +20,7 @@
       <tr>
         <th>ID</th>
         <th>Collection</th>
+        <th>Afhentningskode</th>
         <th>Provider</th>
         <th>Digits</th>
         <th>Status</th>
@@ -58,6 +59,7 @@ async function loadEntries() {
     tr.innerHTML = `
       <td>${row.id}</td>
       <td>${row.collection_id ?? ''}</td>
+      <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
       <td>${row.matched ? 'MATCHED' : 'PENDING'}</td>

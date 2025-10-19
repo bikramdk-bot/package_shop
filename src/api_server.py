@@ -167,8 +167,8 @@ def customer_entry():
     kode = (data.get("kode") or "").strip()
     collection_id = (data.get("collection_id") or "").strip()
 
-    if not provider or not digits:
-        return jsonify({"error": "Missing provider or digits"}), 400
+    if not provider:
+        return jsonify({"error": "Missing provider"}), 400
 
     conn = open_db()
     cursor = conn.cursor()
@@ -176,10 +176,16 @@ def customer_entry():
     provider_upper = provider.upper()
 
     # Check if there's a matching packet (provider + digits) currently in shop
-    if provider_upper == 'UPS':
-        # UPS uses a 5-digit collection code; we accept the entry without requiring a packet match
+    if provider_upper in ('UPS', 'BRING'):
+        # UPS/Bring use a 5-digit collection code; accept entry without requiring a packet match
+        if not kode or not kode.isdigit() or len(kode) != 5:
+            conn.close()
+            return jsonify({"message": "Indtast 5-cifret afhentningskode.", "matched": True, "require_kode": True}), 200
         matched = True
     else:
+        if not digits:
+            conn.close()
+            return jsonify({"error": "Missing digits"}), 400
         cursor.execute("SELECT COUNT(*) FROM packets WHERE provider=? AND digits=? AND status='in_shop'", (provider, digits))
         matched = cursor.fetchone()[0] > 0
 
@@ -195,10 +201,12 @@ def customer_entry():
             return jsonify({"message": "DAO requires a 5-digit collection code.", "matched": True, "require_kode": True}), 200
 
     # Save the customer entry including kode if provided
+    # For UPS/Bring, store digits as NULL and code in 'kode'
+    ins_digits = digits if provider_upper not in ('UPS','BRING') else None
     cursor.execute("""
     INSERT INTO customer_entries (provider, digits, kode, collection_id, status, created_at)
     VALUES (?, ?, ?, ?, 'pending', datetime('now'))
-    """, (provider, digits, kode if kode else None, collection_id if collection_id else None))
+    """, (provider, ins_digits, kode if kode else None, collection_id if collection_id else None))
     entry_id = cursor.lastrowid
 
     conn.commit()
@@ -230,23 +238,23 @@ def assign_collection():
     updated = cursor.rowcount
 
     # Then, propagate collection_id to matching group entries that are currently visible (not held)
-    # Non-UPS: provider+digits+kode match; UPS: provider='UPS' + digits match
+    # UPS/Bring: provider in ('UPS','BRING') + kode match (5-digit code); others: provider+digits+kode match
     # Derive all distinct groups represented by entry_ids and propagate per group.
     cursor.execute(f"SELECT DISTINCT provider, digits, kode FROM customer_entries WHERE id IN ({placeholders})", entry_ids)
     groups = cursor.fetchall()
     for g in groups:
         provider, digits, kode = g
-        if provider == 'UPS':
+        if provider in ('UPS','BRING'):
             cursor.execute(
                 """
                 UPDATE customer_entries
                 SET collection_id = ?
                 WHERE collection_id IS NULL
                   AND status != 'hold'
-                  AND provider = 'UPS'
-                  AND digits = ?
+                  AND provider = ?
+                  AND kode = ?
                 """,
-                (collection_id, digits)
+                (collection_id, provider, kode)
             )
             updated += cursor.rowcount
         else:
@@ -314,57 +322,60 @@ def get_customer_entries():
         WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
     """)
     
-    # 3.5️⃣ Backfill collection_id for entries that share the same digits + kode (LCN)
+    # 3.5️⃣ Backfill collection_id for entries that share the same code (LCN)
     # This ensures a constant collection_id is shown on the live page for the same group.
     # Rule: If an entry has NULL collection_id but there exists another entry with the same
     # provider + digits + kode that has a non-NULL collection_id, propagate that (prefer the earliest one).
     try:
         cursor.execute(
             """
-            UPDATE customer_entries AS c
-            SET collection_id = (
-                SELECT c2.collection_id FROM customer_entries AS c2
-                WHERE c2.collection_id IS NOT NULL
-                  AND c2.kode IS NOT NULL
-                  AND c2.provider = c.provider
-                  AND c2.digits = c.digits
-                  AND c2.kode = c.kode
-                ORDER BY c2.created_at ASC
-                LIMIT 1
-            )
-            WHERE c.collection_id IS NULL
-              AND c.kode IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM customer_entries AS c2
-                WHERE c2.collection_id IS NOT NULL
-                  AND c2.kode IS NOT NULL
-                  AND c2.provider = c.provider
-                  AND c2.digits = c.digits
-                  AND c2.kode = c.kode
-              )
+                        UPDATE customer_entries AS c
+                        SET collection_id = (
+                                SELECT c2.collection_id FROM customer_entries AS c2
+                                WHERE c2.collection_id IS NOT NULL
+                                    AND c2.kode IS NOT NULL
+                                    AND c2.provider = c.provider
+                                    AND (
+                                                (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
+                                         OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                                    )
+                                ORDER BY c2.created_at ASC
+                                LIMIT 1
+                        )
+                        WHERE c.collection_id IS NULL
+                            AND c.kode IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM customer_entries AS c2
+                                WHERE c2.collection_id IS NOT NULL
+                                    AND c2.kode IS NOT NULL
+                                    AND c2.provider = c.provider
+                                    AND (
+                                                (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
+                                         OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                                    )
+                            )
             """
         )
 
-        # UPS case: their 5-digit code is provided as 'digits' and kode is NULL.
-        # Propagate collection_id among UPS entries with the same digits.
+                # UPS/Bring case: their 5-digit code is stored in kode; propagate by provider+kode
         cursor.execute(
             """
             UPDATE customer_entries AS c
             SET collection_id = (
                 SELECT c2.collection_id FROM customer_entries AS c2
                 WHERE c2.collection_id IS NOT NULL
-                  AND c2.provider = 'UPS'
-                  AND c2.digits = c.digits
+                                    AND c2.provider IN ('UPS','BRING')
+                                    AND c2.kode = c.kode
                 ORDER BY c2.created_at ASC
                 LIMIT 1
             )
             WHERE c.collection_id IS NULL
-              AND c.provider = 'UPS'
+                            AND c.provider IN ('UPS','BRING')
               AND EXISTS (
                 SELECT 1 FROM customer_entries AS c2
                 WHERE c2.collection_id IS NOT NULL
-                  AND c2.provider = 'UPS'
-                  AND c2.digits = c.digits
+                                    AND c2.provider IN ('UPS','BRING')
+                                    AND c2.kode = c.kode
               )
             """
         )
