@@ -29,6 +29,48 @@
 
   {% include 'nav_bar.html' %}
   <h2 data-i18n="parcelsInShop">📦 Parcels in Shop</h2>
+  <div id="addPacket" style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <strong data-i18n="addPacket">➕ Add Packet</strong>
+    <label data-i18n="inputProvider">Provider</label>
+    <select id="addProvider">
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="inputDigits">Digits</label>
+    <input id="addDigits" type="text" placeholder="123456" style="width:120px;">
+    <label data-i18n="inputBarcode">Barcode</label>
+    <input id="addBarcode" type="text" placeholder="optional" style="width:180px;">
+    <button onclick="addPacket()" data-i18n="btnAdd">Add</button>
+    <span id="addStatus" style="margin-left:8px;color:#555;"></span>
+  </div>
+  <div style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label data-i18n="filterProvider">Provider</label>
+    <select id="filterProvider">
+      <option value="" selected data-i18n="all">All</option>
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="filterStatus">Status</label>
+    <select id="filterStatus">
+      <option value="" selected data-i18n="all">All</option>
+      <option value="in_shop">in_shop</option>
+      <option value="collected">collected</option>
+      <option value="held">held</option>
+    </select>
+    <label data-i18n="sortBy">Sort</label>
+    <select id="sortBy">
+      <option value="time_desc" selected data-i18n="sortTimeDesc">Newest</option>
+      <option value="time_asc" data-i18n="sortTimeAsc">Oldest</option>
+      <option value="provider_asc" data-i18n="sortProviderAsc">Provider A-Z</option>
+      <option value="provider_desc" data-i18n="sortProviderDesc">Provider Z-A</option>
+    </select>
+  </div>
 
   <table id="parcelTable">
     <thead>
@@ -45,11 +87,61 @@
   </table>
 
   <script>
+  let cache = [];
   async function loadParcels() {
     const res = await fetch('/all_parcels');
+    cache = await res.json();
+    render();
+  }
+
+  async function addPacket(){
+    const provider = document.getElementById('addProvider').value.trim();
+    const digits = document.getElementById('addDigits').value.trim();
+    const barcode = document.getElementById('addBarcode').value.trim();
+    const status = document.getElementById('addStatus');
+    status.textContent = '';
+    if(!provider || !digits){
+      status.textContent = 'Missing provider/digits';
+      status.style.color = 'red';
+      return;
+    }
+    const res = await fetch('/insert', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({provider, digits, barcode})
+    });
     const data = await res.json();
+    if(res.ok){
+      status.textContent = data.message || 'Inserted';
+      status.style.color = 'green';
+      document.getElementById('addDigits').value = '';
+      document.getElementById('addBarcode').value = '';
+      loadParcels();
+    }else{
+      status.textContent = data.warning || data.error || 'Failed';
+      status.style.color = 'red';
+    }
+  }
+
+  function render(){
     const tbody = document.querySelector('#parcelTable tbody');
     tbody.innerHTML = '';
+    const fp = document.getElementById('filterProvider').value;
+    const fs = document.getElementById('filterStatus').value;
+    const sort = document.getElementById('sortBy').value;
+
+    let data = cache.slice();
+    if (fp) data = data.filter(r=>r.provider===fp);
+    if (fs) data = data.filter(r=>r.status===fs);
+
+    const cmp = {
+      time_desc:(a,b)=> new Date(b.scan_time)-new Date(a.scan_time),
+      time_asc:(a,b)=> new Date(a.scan_time)-new Date(b.scan_time),
+      provider_asc:(a,b)=> (a.provider||'').localeCompare(b.provider||''),
+      provider_desc:(a,b)=> (b.provider||'').localeCompare(a.provider||'')
+    };
+    data.sort(cmp[sort]||cmp.time_desc);
+
     data.forEach(row => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -72,6 +164,9 @@
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({provider, digits, status})
     });
+    document.getElementById('filterProvider').addEventListener('change', render);
+    document.getElementById('filterStatus').addEventListener('change', render);
+    document.getElementById('sortBy').addEventListener('change', render);
     loadParcels();
   }
 

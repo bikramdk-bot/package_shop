@@ -320,7 +320,14 @@
       if (!selectedProvider) { msg.textContent = (i18n?.[currentLang]?.chooseProvider)||'Vælg udbyder først'; return; }
       if (inputDigits.length < targetLen) { msg.textContent = (i18n?.[currentLang]?.completeDigits)||'Udfyld alle felter'; return; }
 
-      // Verify via /lookup
+      // UPS and Bring go straight to live with 5-digit kode
+      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+        if (inputDigits.length !== 5) { const m=document.getElementById('message'); m.className='msg error'; m.textContent=(i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
+        await submitCustomerEntry(inputDigits);
+        return;
+      }
+
+      // For PostNord/GLS/DAO: use /lookup to match by digits and escalate length when needed
       const res = await fetch('/lookup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: selectedProvider, digits: inputDigits })
@@ -329,14 +336,6 @@
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
 
-      // UPS/Bring: bypass lookup match requirement, treat 5 digits as collection code directly
-      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
-        if (inputDigits.length !== 5) { const m=document.getElementById('message'); m.className='msg error'; m.textContent=(i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
-        await submitCustomerEntry(inputDigits);
-        return;
-      }
-
-      // For PostNord/GLS/DAO: only escalate digits when multiple matches, not when zero matches
       if (selectedProvider === 'PostNord' || selectedProvider === 'GLS' || selectedProvider === 'DAO') {
         if (results.length > 1) {
           if (targetLen === 4) { targetLen = 6; inputDigits = ''; renderInputBoxes(targetLen); msg.textContent = (i18n?.[currentLang]?.needMoreDigits)||'Indtast flere cifre (6)'; return; }
@@ -347,17 +346,12 @@
           msg.textContent = (i18n?.[currentLang]?.noMatch)||'Ingen match fundet. Prøv igen.';
           return;
         }
-        // results.length === 1 falls through to provider-specific handling below
-      }
-
-      // If DAO: need to ask for kode after a match
-      if (selectedProvider === 'DAO') {
-        openKodeModal();
+        // DAO requires kode after we have a match
+        if (selectedProvider === 'DAO') { openKodeModal(); return; }
+        // Otherwise submit entry immediately
+        await submitCustomerEntry();
         return;
       }
-
-      // Otherwise submit entry immediately
-      await submitCustomerEntry();
     }
 
     async function submitCustomerEntry(kode) {

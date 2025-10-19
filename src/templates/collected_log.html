@@ -33,6 +33,34 @@
   </div>
   {% include 'nav_bar.html' %}
   <h2 data-i18n="logHeading">🗒️ Collected / Held / Expired Parcels</h2>
+  <div style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label data-i18n="filterProvider">Provider</label>
+    <select id="filterProvider">
+      <option value="" selected data-i18n="all">All</option>
+      <option>PostNord</option>
+      <option>DAO</option>
+      <option>GLS</option>
+      <option>Bring</option>
+      <option>UPS</option>
+    </select>
+    <label data-i18n="filterType">Type</label>
+    <select id="filterType">
+      <option value="" selected data-i18n="all">All</option>
+      <option value="collected">collected</option>
+      <option value="collected_staff">collected_staff</option>
+      <option value="held">held</option>
+      <option value="expired_unmatched">expired_unmatched</option>
+    </select>
+    <label data-i18n="sortBy">Sort</label>
+    <select id="sortBy">
+      <option value="time_desc" selected data-i18n="sortTimeDesc">Newest</option>
+      <option value="time_asc" data-i18n="sortTimeAsc">Oldest</option>
+      <option value="provider_asc" data-i18n="sortProviderAsc">Provider A-Z</option>
+      <option value="provider_desc" data-i18n="sortProviderDesc">Provider Z-A</option>
+      <option value="type_asc" data-i18n="sortTypeAsc">Type A-Z</option>
+      <option value="type_desc" data-i18n="sortTypeDesc">Type Z-A</option>
+    </select>
+  </div>
 
   <table>
     <thead>
@@ -44,18 +72,43 @@
         <th data-i18n="colTime">Time</th>
       </tr>
     </thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>{{ r['provider'] }}</td>
-        <td>{{ r['digits'] }}</td>
-        <td>{{ r['barcode'] }}</td>
-        <td>{{ r['log_type'] }}</td>
-        <td>{{ r['collected_at'] }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tbody id="logBody"></tbody>
   </table>
+
+  <script>
+    async function loadLog(){
+      const res = await fetch('/collected_log_data');
+      let data = await res.json();
+      const fp = document.getElementById('filterProvider').value;
+      const ft = document.getElementById('filterType').value;
+      const sort = document.getElementById('sortBy').value;
+
+      if (fp) data = data.filter(r=>r.provider===fp);
+      if (ft) data = data.filter(r=>r.log_type===ft);
+
+      const cmp = {
+        time_desc:(a,b)=> new Date(b.collected_at)-new Date(a.collected_at),
+        time_asc:(a,b)=> new Date(a.collected_at)-new Date(b.collected_at),
+        provider_asc:(a,b)=> (a.provider||'').localeCompare(b.provider||''),
+        provider_desc:(a,b)=> (b.provider||'').localeCompare(a.provider||''),
+        type_asc:(a,b)=> (a.log_type||'').localeCompare(b.log_type||''),
+        type_desc:(a,b)=> (b.log_type||'').localeCompare(a.log_type||'')
+      };
+      data.sort(cmp[sort]||cmp.time_desc);
+
+      const tbody = document.getElementById('logBody');
+      tbody.innerHTML = '';
+      for(const r of data){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.provider}</td><td>${r.digits??''}</td><td>${r.barcode??''}</td><td>${r.log_type}</td><td>${r.collected_at}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+    document.getElementById('filterProvider').addEventListener('change', loadLog);
+    document.getElementById('filterType').addEventListener('change', loadLog);
+    document.getElementById('sortBy').addEventListener('change', loadLog);
+    loadLog();
+  </script>
 
   <script>
     // i18n for staff log page

@@ -65,7 +65,8 @@ async function loadEntries() {
   for (const row of data) {
     const createdAt = new Date(row.created_at);
     const elapsed = (now - createdAt) / 1000;
-  const remaining = Math.max(0, 300 - elapsed);
+    // Prefer server-computed remaining (hold-aware). Fallback to naive calc.
+    const remaining = Math.max(0, typeof row.remaining === 'number' ? row.remaining : (300 - elapsed));
 
     const tr = document.createElement('tr');
 
@@ -74,17 +75,26 @@ async function loadEntries() {
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
 
+    const statusText = row.held
+      ? (i18n?.[currentLang]?.statusPaused || 'PAUSED')
+      : (row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING'));
+
+    const holdBtnLabel = i18n?.[currentLang]?.btnHold || 'Hold';
+    const resolveBtnLabel = i18n?.[currentLang]?.btnResolve || 'Resolve';
+
     tr.innerHTML = `
       <td>${row.id}</td>
       <td>${row.collection_id ?? ''}</td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING')}</td>
-      <td class="countdown" data-created="${row.created_at}" style="color:${color}">
-        ${remaining.toFixed(0)}s
+      <td>${statusText}</td>
+      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
+      <td>
+        ${row.held
+          ? `<button onclick="resolvePrompt(${row.id})">${resolveBtnLabel}</button>`
+          : `<button onclick="hold(${row.id})">${holdBtnLabel}</button>`}
       </td>
-      <td><button data-i18n="btnHold" onclick="hold(${row.id})">Hold</button></td>
     `;
 
     tbody.appendChild(tr);
@@ -93,12 +103,14 @@ async function loadEntries() {
 
 function updateCountdowns() {
   const cells = document.querySelectorAll('.countdown');
-  const now = new Date();
   cells.forEach(cell => {
-    const created = new Date(cell.dataset.created);
-    const elapsed = (now - created) / 1000;
-  const remaining = Math.max(0, 300 - elapsed);
-    cell.textContent = `${remaining.toFixed(0)}s`;
+    const held = cell.dataset.held === '1';
+    let remaining = parseInt(cell.dataset.remaining || '0', 10);
+    if (!held && remaining > 0) {
+      remaining -= 1;
+      cell.dataset.remaining = String(remaining);
+    }
+    cell.textContent = `${remaining}s`;
     cell.style.color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
@@ -112,6 +124,25 @@ async function hold(id) {
     body: JSON.stringify({ entry_id: id })
   });
   loadEntries(); // refresh after hold
+}
+
+function resolvePrompt(id){
+  const message = (i18n?.[currentLang]?.confirmCollected || 'Mark as Collected?\nPress Cancel to Keep in Shop.');
+  const choice = window.confirm(message);
+  if (choice) {
+    resolve(id, 'collected');
+  } else {
+    resolve(id, 'keep');
+  }
+}
+
+async function resolve(id, action){
+  await fetch('/resolve_entry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entry_id: id, action })
+  });
+  loadEntries();
 }
 
 // refresh table every 2s, update timers every 1s
