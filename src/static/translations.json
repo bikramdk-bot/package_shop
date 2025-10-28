@@ -68,7 +68,10 @@
     "sortTimeAsc": "Ældste",
     "sortProviderAsc": "Udbyder A-Å",
     "sortProviderDesc": "Udbyder Å-A",
-    "all": "Alle"
+    "all": "Alle",
+    "licenseExpiredTitle": "🔒 Licensen er udløbet",
+    "licenseExpiredMsg": "Aktivér din licens for at fortsætte med at bruge dashboardet.",
+    "activateLicense": "Aktivér licens"
   },
   "en": {
     "title": "Customer Check-in",
@@ -139,7 +142,10 @@
     "sortTimeAsc": "Oldest",
     "sortProviderAsc": "Provider A-Z",
     "sortProviderDesc": "Provider Z-A",
-    "all": "All"
+    "all": "All",
+    "licenseExpiredTitle": "🔒 License expired",
+    "licenseExpiredMsg": "Please activate your license to continue using the dashboard.",
+    "activateLicense": "Activate License"
   },
   "de": {
     "title": "Kunden-Check-in",
@@ -210,7 +216,10 @@
     "sortTimeAsc": "Älteste",
     "sortProviderAsc": "Anbieter A-Z",
     "sortProviderDesc": "Anbieter Z-A",
-    "all": "Alle"
+    "all": "Alle",
+    "licenseExpiredTitle": "🔒 Lizenz abgelaufen",
+    "licenseExpiredMsg": "Bitte aktivieren Sie Ihre Lizenz, um das Dashboard weiter zu nutzen.",
+    "activateLicense": "Lizenz aktivieren"
   },
   "sv": {
     "title": "Kundincheckning",
@@ -281,6 +290,9 @@
     "sortTimeAsc": "Äldst",
     "sortProviderAsc": "Leverantör A-Ö",
     "sortProviderDesc": "Leverantör Ö-A",
-    "all": "Alla"
+    "all": "Alla",
+    "licenseExpiredTitle": "🔒 Licensen har gått ut",
+    "licenseExpiredMsg": "Aktivera din licens för att fortsätta använda instrumentpanelen.",
+    "activateLicense": "Aktivera licens"
   }
 }

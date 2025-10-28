@@ -7,7 +7,7 @@ from license_manager import (
     apply_token,
 )
 import sqlite3, os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 app = Flask(__name__)
 
@@ -956,6 +956,22 @@ def delete_parcel_api():
     conn.commit()
     conn.close()
     return jsonify({"message": "Packet deleted."})
+
+# ---------------------- LICENSE STATUS (for UI gating) ----------------------
+@app.route("/license_status")
+def license_status():
+    try:
+        info = get_current_expiry()
+        today = date.today()
+        exp_dt = datetime.strptime(info.expiry_str, "%Y-%m-%d").date()
+        active = today <= exp_dt
+        return jsonify({
+            "expiry": info.expiry_str,
+            "today": today.strftime("%Y-%m-%d"),
+            "active": active
+        })
+    except Exception as e:
+        return jsonify({"error": "license_status_failed", "detail": str(e)}), 500
 
 # ---------------------- PUBLIC INSERT (for scanner or curl) ----------------------
 @app.route("/insert", methods=["POST"])
