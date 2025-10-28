@@ -1,6 +1,11 @@
 from flask import Flask, request, jsonify, render_template
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel
-from db_manager import init_db
+from license_manager import (
+    ensure_token_db,
+    ensure_default_license,
+    get_current_expiry,
+    apply_token,
+)
 import sqlite3, os
 from datetime import datetime, timedelta
 
@@ -97,14 +102,12 @@ def run_migrations():
     finally:
         conn.close()
 
-
-# Ensure the database and base tables exist as soon as the API module loads
+# Ensure license token DB and default license exist at startup (non-fatal if missing)
 try:
-    init_db()
-    run_migrations()
+    ensure_token_db()
+    ensure_default_license()
 except Exception as e:
-    # Don't crash the server if another process races to create/alter the DB
-    print(f"[startup] DB initialization warning: {e}")
+    print(f"[startup] License initialization warning: {e}")
 
 # ---------------------- LOOKUP ----------------------
 @app.route("/lookup", methods=["GET", "POST"])
@@ -859,6 +862,41 @@ def assign_collection():
 def dashboard():
     return render_template("dashboard.html")
 
+@app.route("/staff", methods=["GET"])
+def staff_dashboard():
+    info = get_current_expiry()
+    return render_template("staff_dashboard.html", expiry=info.expiry_str, message=None, success=None)
+
+
+@app.route("/activate", methods=["POST"])
+def activate_token():
+    # Accept token from form or JSON
+    token = (request.form.get("token") if request.form else None) or (
+        (request.get_json(silent=True) or {}).get("token")
+    )
+    if not token:
+        info = get_current_expiry()
+        return render_template(
+            "staff_dashboard.html",
+            expiry=info.expiry_str,
+            message="Missing token",
+            success=False,
+        ), 400
+
+    success, message, info = apply_token(token)
+
+    if request.is_json:
+        payload = {"success": success, "message": message, "expiry": (info.expiry_str if info else get_current_expiry().expiry_str)}
+        return jsonify(payload), (200 if success else 400)
+
+    final_info = info or get_current_expiry()
+    return render_template(
+        "staff_dashboard.html",
+        expiry=final_info.expiry_str,
+        message=message,
+        success=success,
+    ), (200 if success else 400)
+
 @app.route("/all_parcels")
 def all_parcels():
     conn = open_db()
@@ -945,8 +983,7 @@ def insert_packet():
 
 
 if __name__ == "__main__":
-    # Create database and run lightweight migrations when launched directly
-    init_db()
+    # Run lightweight migrations once at startup to avoid ALTER TABLE during traffic
     run_migrations()
     print("🚀 API Server running with packets.db")
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
