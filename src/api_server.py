@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel
+from db_manager import init_db
 import sqlite3, os
 from datetime import datetime, timedelta
 
@@ -95,6 +96,15 @@ def run_migrations():
         pass
     finally:
         conn.close()
+
+
+# Ensure the database and base tables exist as soon as the API module loads
+try:
+    init_db()
+    run_migrations()
+except Exception as e:
+    # Don't crash the server if another process races to create/alter the DB
+    print(f"[startup] DB initialization warning: {e}")
 
 # ---------------------- LOOKUP ----------------------
 @app.route("/lookup", methods=["GET", "POST"])
@@ -779,9 +789,9 @@ def assign_collection():
                     (collection_id, prov, digs, kode, kode),
                 )
             updated += cur.rowcount
-    conn.commit()
-    conn.close()
-    return jsonify({"updated": updated, "collection_id": collection_id})
+        conn.commit()
+        conn.close()
+        return jsonify({"updated": updated, "collection_id": collection_id})
 
     # Case 2: Backward-compatible assignment by provider/digits/kode
     provider = (data.get("provider") or "").strip()
@@ -935,7 +945,8 @@ def insert_packet():
 
 
 if __name__ == "__main__":
-    # Run lightweight migrations once at startup to avoid ALTER TABLE during traffic
+    # Create database and run lightweight migrations when launched directly
+    init_db()
     run_migrations()
     print("🚀 API Server running with packets.db")
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
