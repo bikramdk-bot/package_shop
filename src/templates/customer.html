@@ -43,7 +43,7 @@
       justify-content: space-between;
       padding: 12px 20px;
     }
-    .flags { display: flex; gap: 8px; }
+  .flags { display: flex; gap: 8px; position: relative; z-index: 1000; }
     .flag {
       width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: var(--shadow);
       display: inline-flex; align-items: center; justify-content: center; user-select: none;
@@ -112,6 +112,13 @@
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
+  /* License expired overlay */
+  #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
+  #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
+  #licenseBlocker p { margin: 0; color: #374151; }
+  #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  #licenseBlocker a.btn:hover { background: #d97706; }
+
     @media (max-width: 680px) {
       .providers { grid-template-columns: repeat(2, 1fr); }
     }
@@ -119,6 +126,11 @@
 </head>
 <body>
   <div class="page">
+    <div id="licenseBlocker" aria-live="polite" aria-atomic="true">
+      <h2 data-i18n="licenseExpiredTitle">🔒 License expired</h2>
+      <p data-i18n="licenseExpiredMsg">Please activate your license to continue using the dashboard.</p>
+      <a class="btn" href="/staff" data-i18n="activateLicense">Activate License</a>
+    </div>
     <div class="topbar">
       <div class="flags">
         <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
@@ -526,6 +538,16 @@
       renderProviders();
       // ensure flags reflect current language
       updateLanguage(currentLang);
+      // Check license status and block UI if expired
+      try {
+        const res = await fetch('/license_status');
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.active) {
+            document.getElementById('licenseBlocker').style.display = 'flex';
+          }
+        }
+      } catch {}
     })();
   </script>
 </body>
