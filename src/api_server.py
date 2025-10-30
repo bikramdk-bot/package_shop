@@ -95,6 +95,16 @@ def run_migrations():
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_started_at TEXT")
         if 'hold_accumulated' not in cols:
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_accumulated INTEGER DEFAULT 0")
+        # Simple single-row counter for kiosk ticket numbers (1..99 roll-over)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kiosk_counter (
+                id INTEGER PRIMARY KEY CHECK (id=1),
+                last_number INTEGER DEFAULT 0
+            )
+            """
+        )
+        cur.execute("INSERT OR IGNORE INTO kiosk_counter (id, last_number) VALUES (1, 0)")
         conn.commit()
     except sqlite3.OperationalError:
         # If locked during startup, ignore; next startup/run can add these.
@@ -856,6 +866,28 @@ def assign_collection():
     conn.commit()
     conn.close()
     return jsonify({"collection_id": collection_id})
+
+# ---------------------- KIOSK: CUSTOMER NUMBER (1..99) ----------------------
+@app.route("/assign_customer_number", methods=["POST"])
+def assign_customer_number():
+    conn = open_db()
+    cur = conn.cursor()
+    # Ensure the single row exists
+    cur.execute("INSERT OR IGNORE INTO kiosk_counter (id, last_number) VALUES (1, 0)")
+    # Use an immediate transaction to avoid race conditions for concurrent requests
+    try:
+        cur.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        # If cannot escalate lock, continue; UPDATE should still serialize under busy_timeout
+        pass
+    cur.execute("SELECT last_number FROM kiosk_counter WHERE id=1")
+    row = cur.fetchone()
+    last = int(row[0]) if row and row[0] is not None else 0
+    new_num = (last % 99) + 1
+    cur.execute("UPDATE kiosk_counter SET last_number=? WHERE id=1", (new_num,))
+    conn.commit()
+    conn.close()
+    return jsonify({"number": new_num})
 
 # ---------------------- STAFF DASHBOARD + APIs ----------------------
 @app.route("/dashboard")
