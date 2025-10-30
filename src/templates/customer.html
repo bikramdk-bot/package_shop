@@ -460,7 +460,11 @@
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
       try {
-        const res = await fetch('/assign_customer_number', { method: 'POST' });
+        const uniqueIds = Array.from(new Set(entryIds));
+        const res = await fetch('/assign_customer_number', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry_ids: uniqueIds })
+        });
         if (res.ok) {
           const data = await res.json();
           const num = data?.number;

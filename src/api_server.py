@@ -95,6 +95,13 @@ def run_migrations():
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_started_at TEXT")
         if 'hold_accumulated' not in cols:
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_accumulated INTEGER DEFAULT 0")
+        # Countdown will start upon number assignment
+        cur.execute("PRAGMA table_info(customer_entries)")
+        cols2 = [r[1] for r in cur.fetchall()]
+        if 'number_assigned_at' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN number_assigned_at TEXT")
+        if 'ticket_number' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN ticket_number INTEGER")
         # Simple single-row counter for kiosk ticket numbers (1..99 roll-over)
         cur.execute(
             """
@@ -169,15 +176,19 @@ def lookup_parcel():
     for e in rows:
         if e["status"] == 'hold':
             continue
+        # Start countdown only after number is assigned
+        num_at = e["number_assigned_at"] if isinstance(e, sqlite3.Row) else None
         try:
-            created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e["created_at"] else now
+            start_dt = datetime.strptime(num_at, "%Y-%m-%d %H:%M:%S") if num_at else None
         except Exception:
-            created_dt = now
+            start_dt = None
+        if not start_dt:
+            continue  # not started yet, do not expire
         hold_acc = int(e["hold_accumulated"] or 0)
         # if held, include ongoing hold duration, else only accumulated
         hold_total = hold_acc
         # not held now, so no extra ongoing hold
-        effective_elapsed = (now - created_dt).total_seconds() - hold_total
+        effective_elapsed = (now - start_dt).total_seconds() - hold_total
         if effective_elapsed >= 300:
             c2 = conn.cursor()
             c2.execute(
@@ -273,7 +284,8 @@ def lookup_parcel():
     cursor.execute(
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
-               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated
+               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               number_assigned_at
         FROM customer_entries
         ORDER BY created_at DESC
         """
@@ -288,14 +300,14 @@ def lookup_parcel():
             "SELECT COUNT(*) FROM packets WHERE UPPER(provider)=UPPER(?) AND status='in_shop' AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)",
             (e["provider"], e["digits"], e["digits"], e["digits"]))
         e["matched"] = c2.fetchone()[0] > 0
-        # remaining time
-        try:
-            created_dt = datetime.strptime(e["created_at"].replace('T',' ').replace('Z',''), "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now
-        except Exception:
+        # remaining time starts after number_assigned_at
+        start_str = e.get("number_assigned_at")
+        start_dt = None
+        if start_str:
             try:
-                created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now
+                start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
             except Exception:
-                created_dt = now
+                start_dt = None
         hold_acc = int(e.get("hold_accumulated") or 0)
         hold_total = hold_acc
         if e.get("status") == 'hold' and e.get("hold_started_at"):
@@ -304,8 +316,11 @@ def lookup_parcel():
                 hold_total += int((now - hold_started).total_seconds())
             except Exception:
                 pass
-        effective_elapsed = (now - created_dt).total_seconds() - hold_total
-        e["remaining"] = max(0, 300 - int(effective_elapsed))
+        if start_dt:
+            effective_elapsed = (now - start_dt).total_seconds() - hold_total
+            e["remaining"] = max(0, 300 - int(effective_elapsed))
+        else:
+            e["remaining"] = 300
         e["held"] = e.get("status") == 'hold'
 
     # Normalize created_at for browser
@@ -358,10 +373,12 @@ def get_customer_entries():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1️⃣ Identify expired (non-held) customer entries
+    # 1️⃣ Identify expired (non-held) customer entries (only after number assignment)
     cursor.execute("""
         SELECT id, provider, digits FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
+        WHERE status != 'hold'
+          AND number_assigned_at IS NOT NULL
+          AND number_assigned_at <= datetime('now', '-300 seconds')
     """)
     expired = cursor.fetchall()
 
@@ -398,7 +415,9 @@ def get_customer_entries():
     # 3️⃣ Delete expired customer entries
     cursor.execute("""
         DELETE FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
+        WHERE status != 'hold'
+          AND number_assigned_at IS NOT NULL
+          AND number_assigned_at <= datetime('now', '-300 seconds')
     """)
     
     # 3.5️⃣ Backfill collection_id for entries that share the same code (LCN)
@@ -466,7 +485,8 @@ def get_customer_entries():
     cursor.execute(
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
-               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated
+               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               number_assigned_at
         FROM customer_entries
         ORDER BY created_at DESC
         """
@@ -476,10 +496,13 @@ def get_customer_entries():
     now2 = datetime.utcnow()
     for e in entries:
         # compute remaining considering holds
-        try:
-            created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now2
-        except Exception:
-            created_dt = now2
+        # Countdown starts after number assignment
+        start_dt = None
+        if e.get("number_assigned_at"):
+            try:
+                start_dt = datetime.strptime(e["number_assigned_at"], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                start_dt = None
         hold_total = int(e.get("hold_accumulated") or 0)
         if e.get("status") == 'hold' and e.get("hold_started_at"):
             try:
@@ -487,8 +510,11 @@ def get_customer_entries():
                 hold_total += int((now2 - hold_started).total_seconds())
             except Exception:
                 pass
-        effective_elapsed = (now2 - created_dt).total_seconds() - hold_total
-        e["remaining"] = max(0, 300 - int(effective_elapsed))
+        if start_dt:
+            effective_elapsed = (now2 - start_dt).total_seconds() - hold_total
+            e["remaining"] = max(0, 300 - int(effective_elapsed))
+        else:
+            e["remaining"] = 300
         e["held"] = e.get("status") == 'hold'
 
     # 5️⃣ Add match flag
@@ -868,8 +894,11 @@ def assign_collection():
     return jsonify({"collection_id": collection_id})
 
 # ---------------------- KIOSK: CUSTOMER NUMBER (1..99) ----------------------
-@app.route("/assign_customer_number", methods=["POST"])
+@app.route("/assign_customer_number", methods=["POST"]) 
 def assign_customer_number():
+    data = request.get_json(silent=True) or {}
+    entry_ids = data.get("entry_ids")
+
     conn = open_db()
     cur = conn.cursor()
     # Ensure the single row exists
@@ -885,6 +914,18 @@ def assign_customer_number():
     last = int(row[0]) if row and row[0] is not None else 0
     new_num = (last % 99) + 1
     cur.execute("UPDATE kiosk_counter SET last_number=? WHERE id=1", (new_num,))
+    # If provided, mark the listed entries as having started countdown now, and store ticket number
+    if isinstance(entry_ids, list) and entry_ids:
+        placeholders = ",".join(["?"] * len(entry_ids))
+        cur.execute(
+            f"""
+            UPDATE customer_entries
+            SET number_assigned_at = strftime('%Y-%m-%d %H:%M:%S','now'),
+                ticket_number = ?
+            WHERE id IN ({placeholders})
+            """,
+            [new_num, *entry_ids]
+        )
     conn.commit()
     conn.close()
     return jsonify({"number": new_num})
