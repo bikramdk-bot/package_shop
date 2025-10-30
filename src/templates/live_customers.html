@@ -14,9 +14,20 @@
   .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
   .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
   .flag img { width: 28px; height: 20px; display: block; }
+  /* License expired overlay */
+  #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
+  #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
+  #licenseBlocker p { margin: 0; color: #374151; }
+  #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  #licenseBlocker a.btn:hover { background: #d97706; }
 </style>
 </head>
 <body>
+  <div id="licenseBlocker" aria-live="polite" aria-atomic="true">
+    <h2 data-i18n="licenseExpiredTitle">🔒 License expired</h2>
+    <p data-i18n="licenseExpiredMsg">Please activate your license to continue using the dashboard.</p>
+    <a class="btn" href="/staff" data-i18n="activateLicense">Activate License</a>
+  </div>
   <div class="flags">
     <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
       <img src="/static/flags/da.svg" alt="Dansk" />
@@ -37,13 +48,13 @@
     <thead>
       <tr>
         <th data-i18n="colId">ID</th>
-        <th data-i18n="colCollection">Collection</th>
+        <th data-i18n="assignCustomerNumber">Customer Number</th>
         <th data-i18n="colKode">Afhentningskode</th>
         <th data-i18n="colProvider">Provider</th>
         <th data-i18n="colDigits">Digits</th>
-        <th data-i18n="colStatus">Status</th>
+        <th data-i18n="colHold">Clock</th>
+        <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
-        <th data-i18n="btnHold">Hold</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -70,31 +81,34 @@ async function loadEntries() {
 
     const tr = document.createElement('tr');
 
-    // color-code based on remaining time
+    // color-code remaining text and group background by ticket_number
     const color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
+    const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
+    const groupIdx = ((basis - 1) % 10) + 1; // 1..10
+    tr.classList.add(`customer-color-${groupIdx}`);
 
-    const statusText = row.held
-      ? (i18n?.[currentLang]?.statusPaused || 'PAUSED')
-      : (row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING'));
-
-    const holdBtnLabel = i18n?.[currentLang]?.btnHold || 'Hold';
-    const resolveBtnLabel = i18n?.[currentLang]?.btnResolve || 'Resolve';
+  const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
+  const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';
+    const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
+    const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
 
     tr.innerHTML = `
       <td>${row.id}</td>
-      <td>${row.collection_id ?? ''}</td>
+      <td>${row.ticket_number ?? ''}</td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${statusText}</td>
-      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
       <td>
-        ${row.held
-          ? `<button onclick="resolvePrompt(${row.id})">${resolveBtnLabel}</button>`
-          : `<button onclick="hold(${row.id})">${holdBtnLabel}</button>`}
+        <button onclick="holdStartEntry(${row.id})">${holdStart}</button>
+        <button onclick="holdPauseEntry(${row.id})">${holdPause}</button>
       </td>
+      <td>
+        <button onclick="deliveredEntry(${row.id})">${delivered}</button>
+        <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
+      </td>
+      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
     `;
 
     tbody.appendChild(tr);
@@ -117,7 +131,7 @@ function updateCountdowns() {
   });
 }
 
-async function hold(id) {
+async function holdStartEntry(id) {
   await fetch('/hold_entry', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -126,14 +140,13 @@ async function hold(id) {
   loadEntries(); // refresh after hold
 }
 
-function resolvePrompt(id){
-  const message = (i18n?.[currentLang]?.confirmCollected || 'Mark as Collected?\nPress Cancel to Keep in Shop.');
-  const choice = window.confirm(message);
-  if (choice) {
-    resolve(id, 'collected');
-  } else {
-    resolve(id, 'keep');
-  }
+async function holdPauseEntry(id) {
+  await fetch('/unhold_entry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entry_id: id })
+  });
+  loadEntries();
 }
 
 async function resolve(id, action){
@@ -144,6 +157,9 @@ async function resolve(id, action){
   });
   loadEntries();
 }
+
+function deliveredEntry(id) { resolve(id, 'collected'); }
+function notDeliveredEntry(id) { resolve(id, 'keep'); }
 
 // refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);
@@ -176,6 +192,15 @@ function updateLanguage(lang){
   await loadTranslations();
   applyI18n();
   updateLanguage(currentLang);
+  try {
+    const res = await fetch('/license_status');
+    if (res.ok) {
+      const data = await res.json();
+      if (!data.active) {
+        document.getElementById('licenseBlocker').style.display = 'flex';
+      }
+    }
+  } catch {}
   loadEntries();
 })();
 </script>

@@ -43,7 +43,7 @@
       justify-content: space-between;
       padding: 12px 20px;
     }
-    .flags { display: flex; gap: 8px; }
+  .flags { display: flex; gap: 8px; position: relative; z-index: 1000; }
     .flag {
       width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: var(--shadow);
       display: inline-flex; align-items: center; justify-content: center; user-select: none;
@@ -112,6 +112,13 @@
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
+  /* License expired overlay */
+  #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
+  #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
+  #licenseBlocker p { margin: 0; color: #374151; }
+  #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  #licenseBlocker a.btn:hover { background: #d97706; }
+
     @media (max-width: 680px) {
       .providers { grid-template-columns: repeat(2, 1fr); }
     }
@@ -119,6 +126,11 @@
 </head>
 <body>
   <div class="page">
+    <div id="licenseBlocker" aria-live="polite" aria-atomic="true">
+      <h2 data-i18n="licenseExpiredTitle">🔒 License expired</h2>
+      <p data-i18n="licenseExpiredMsg">Please activate your license to continue using the dashboard.</p>
+      <a class="btn" href="/staff" data-i18n="activateLicense">Activate License</a>
+    </div>
     <div class="topbar">
       <div class="flags">
         <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}">
@@ -169,17 +181,19 @@
     </div>
   </div>
 
-  <!-- Success modal -->
+  <!-- Success / Next step modal -->
   <div id="doneOverlay" class="overlay" role="dialog" aria-modal="true">
     <div class="modal">
-      <h3 data-i18n="successTitle">Tak! Din indtastning er modtaget.</h3>
+      <!-- Step A: Ask if more packets -->
+      <h3 id="moreHdr" data-i18n="haveMorePackets">Har du flere pakker?</h3>
       <div id="finalInfo" style="display:none;">
         <p><span data-i18n="collectionId">Indsamlings-ID</span>: <strong id="colId">#C-00000</strong></p>
         <p><span data-i18n="totalParcels">Samlet antal pakker</span>: <strong id="colCount">0</strong></p>
       </div>
+      <div id="ticketInfo" class="msg success" style="display:none; font-size:20px; margin: 10px 0 6px;"></div>
       <div class="actions">
-        <button class="btn btn-ghost" onclick="finalizeCollection()" data-i18n="noMore">Nej, færdig</button>
-        <button class="btn btn-primary" onclick="nextParcel()" data-i18n="yesMore">Ja, har flere</button>
+        <button id="noBtn" class="btn btn-ghost" onclick="assignCustomerNumber()" data-i18n="no">NEJ</button>
+        <button id="yesBtn" class="btn btn-primary" onclick="nextParcel()" data-i18n="yes">JA</button>
       </div>
     </div>
   </div>
@@ -354,7 +368,7 @@
       }
     }
 
-    async function submitCustomerEntry(kode) {
+  async function submitCustomerEntry(kode) {
       const payload = { provider: selectedProvider };
       // For UPS/Bring, send kode and omit digits; otherwise send digits and kode if present
       if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
@@ -381,20 +395,19 @@
         return;
       }
 
-  // success -> store entry id and prompt if more (support both 'id' and legacy 'entry_id')
+  // success -> store entry id and prompt for more packets
   const newId = (typeof data.id !== 'undefined') ? data.id : data.entry_id;
   if (newId && !entryIds.includes(newId)) entryIds.push(newId);
   const finalInfo = document.getElementById('finalInfo');
   if (finalInfo) finalInfo.style.display = 'none';
+  const ticketInfo = document.getElementById('ticketInfo');
+  if (ticketInfo) { ticketInfo.style.display='none'; ticketInfo.textContent=''; }
+  const hdr = document.getElementById('moreHdr');
+  if (hdr) hdr.setAttribute('data-i18n', 'haveMorePackets');
+  applyI18n();
+  document.getElementById('yesBtn').style.display = '';
+  document.getElementById('noBtn').style.display = '';
   document.getElementById('doneOverlay').classList.add('show');
-  // Reset modal buttons for a fresh session prompt
-  const yesBtn0 = document.querySelector('#doneOverlay .btn.btn-primary');
-  if (yesBtn0) yesBtn0.style.display = '';
-  const noBtn0 = document.querySelector('#doneOverlay .btn.btn-ghost');
-  if (noBtn0) {
-    noBtn0.onclick = finalizeCollection;
-    noBtn0.textContent = (i18n?.[currentLang]?.noMore) || 'Nej, færdig';
-  }
     }
 
     // --- DAO kode modal ---
@@ -444,66 +457,42 @@
       document.getElementById('message').textContent = '';
       setTimeout(()=>focusActiveBox(), 50);
     }
-    async function finalizeCollection() {
-      // Assign an ID only when customer is done
-      if (entryIds.length === 0) { finishSession(); return; }
-      // De-duplicate in case the same entry was added twice
-      const uniqueIds = Array.from(new Set(entryIds));
-      if (!sessionId) sessionId = `#C-${String(Math.floor(Math.random()*100000)).padStart(5,'0')}`;
-
-      // Immediately show the code while assignment runs in the background
-      document.getElementById('colId').textContent = sessionId;
-      document.getElementById('colCount').textContent = String(uniqueIds.length);
-      const finalInfoEarly = document.getElementById('finalInfo');
-      if (finalInfoEarly) finalInfoEarly.style.display = 'block';
-      const yesBtnEarly = document.querySelector('#doneOverlay .btn.btn-primary');
-      if (yesBtnEarly) yesBtnEarly.style.display = 'none';
-      const noBtnEarly = document.querySelector('#doneOverlay .btn.btn-ghost');
-      if (noBtnEarly) { noBtnEarly.onclick = finishSession; noBtnEarly.textContent = (i18n?.[currentLang]?.ok) || 'OK'; }
-      // Attempt assignment with a simple retry
-      let res = await fetch('/assign_collection', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry_ids: uniqueIds, collection_id: sessionId })
-      });
-      if (!res.ok) {
-        await new Promise(r=>setTimeout(r,300));
-        res = await fetch('/assign_collection', {
+    async function assignCustomerNumber() {
+      // Ask backend for a rolling 1..99 number and show it
+      try {
+        const uniqueIds = Array.from(new Set(entryIds));
+        const res = await fetch('/assign_customer_number', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entry_ids: uniqueIds, collection_id: sessionId })
+          body: JSON.stringify({ entry_ids: uniqueIds })
         });
-      }
-
-      if (res.ok) {
-        let payload = null;
-        try { payload = await res.json(); } catch {}
-        if (payload && typeof payload.updated === 'number' && payload.updated === 0) {
-          // Nothing was updated (could have expired). Show a gentle notice but still allow OK.
-          const msg = document.getElementById('message');
-          if (msg) { msg.className='msg error'; msg.textContent=(i18n?.[currentLang]?.noMatch)||'Ingen match fundet. Prøv igen.'; }
+        if (res.ok) {
+          const data = await res.json();
+          const num = data?.number;
+          const ticketInfo = document.getElementById('ticketInfo');
+          const hdr = document.getElementById('moreHdr');
+          if (hdr) hdr.textContent = (i18n?.[currentLang]?.yourNumberIs || 'Dit nummer er') + ` ${num}.`;
+          if (ticketInfo) {
+            ticketInfo.style.display = 'block';
+            ticketInfo.textContent = '';
+          }
+          // Hide Yes/No, show only OK on the NO (ghost) button
+          const yesBtn = document.getElementById('yesBtn');
+          if (yesBtn) yesBtn.style.display = 'none';
+          const noBtn = document.getElementById('noBtn');
+          if (noBtn) {
+            noBtn.textContent = (i18n?.[currentLang]?.ok) || 'OK';
+            noBtn.onclick = finishSession;
+          }
+        } else {
+          throw new Error('bad status');
         }
-        document.getElementById('colId').textContent = sessionId;
-        document.getElementById('colCount').textContent = String(uniqueIds.length);
-        const finalInfo = document.getElementById('finalInfo');
-        if (finalInfo) finalInfo.style.display = 'block';
-        const yesBtn = document.querySelector('#doneOverlay .btn.btn-primary');
-        if (yesBtn) yesBtn.style.display = 'none';
-        const noBtn = document.querySelector('#doneOverlay .btn.btn-ghost');
-        if (noBtn) {
-          noBtn.onclick = finishSession;
-          noBtn.textContent = (i18n?.[currentLang]?.ok) || 'OK';
+      } catch (e) {
+        const ticketInfo = document.getElementById('ticketInfo');
+        if (ticketInfo) {
+          ticketInfo.style.display = 'block';
+          ticketInfo.className = 'msg error';
+          ticketInfo.textContent = (i18n?.[currentLang]?.noMatch)||'Ingen match fundet. Prøv igen.';
         }
-      } else {
-        // As a fallback, still show the generated code so staff can assist
-        document.getElementById('colId').textContent = sessionId;
-        document.getElementById('colCount').textContent = String(uniqueIds.length);
-        const finalInfo = document.getElementById('finalInfo');
-        if (finalInfo) finalInfo.style.display = 'block';
-        const msg = document.getElementById('message');
-        if (msg) { msg.className='msg error'; msg.textContent='Kunne ikke tildele lige nu. Prøv igen eller vis koden til personalet.'; }
-        const yesBtn = document.querySelector('#doneOverlay .btn.btn-primary');
-        if (yesBtn) yesBtn.style.display = 'none';
-        const noBtn = document.querySelector('#doneOverlay .btn.btn-ghost');
-        if (noBtn) { noBtn.onclick = finishSession; noBtn.textContent = (i18n?.[currentLang]?.ok) || 'OK'; }
       }
     }
     function finishSession() {
@@ -514,10 +503,15 @@
       document.getElementById('boxes').innerHTML='';
       document.getElementById('helper').textContent='';
       document.getElementById('prompt').textContent = (i18n?.[currentLang]?.prompt) || 'Vælg udbyder og indtast cifre';
-      const yesBtn = document.querySelector('#doneOverlay .btn.btn-primary');
-      if (yesBtn) yesBtn.style.display = '';
-      const noBtn = document.querySelector('#doneOverlay .btn.btn-ghost');
-      if (noBtn) { noBtn.onclick = finalizeCollection; noBtn.textContent = (i18n?.[currentLang]?.noMore) || 'Nej, færdig'; }
+      // Reset modal UI to initial state for next time
+      const yesBtn = document.getElementById('yesBtn');
+      const noBtn = document.getElementById('noBtn');
+      if (yesBtn) { yesBtn.style.display=''; yesBtn.textContent = (i18n?.[currentLang]?.yes) || 'JA'; yesBtn.onclick = nextParcel; }
+      if (noBtn) { noBtn.style.display=''; noBtn.textContent = (i18n?.[currentLang]?.no) || 'NEJ'; noBtn.onclick = assignCustomerNumber; }
+      const hdr = document.getElementById('moreHdr');
+      if (hdr) { hdr.setAttribute('data-i18n','haveMorePackets'); applyI18n(); }
+      const ticketInfo = document.getElementById('ticketInfo');
+      if (ticketInfo) { ticketInfo.style.display='none'; ticketInfo.textContent=''; ticketInfo.className='msg success'; }
     }
 
     // Init
@@ -526,6 +520,16 @@
       renderProviders();
       // ensure flags reflect current language
       updateLanguage(currentLang);
+      // Check license status and block UI if expired
+      try {
+        const res = await fetch('/license_status');
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.active) {
+            document.getElementById('licenseBlocker').style.display = 'flex';
+          }
+        }
+      } catch {}
     })();
   </script>
 </body>

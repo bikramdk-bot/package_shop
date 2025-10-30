@@ -24,13 +24,25 @@
       cursor: pointer;
     }
     button:hover { background-color: #00408f; }
+    /* License expired overlay */
+    #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
+    #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
+    #licenseBlocker p { margin: 0; color: #374151; }
+    #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+    #licenseBlocker a.btn:hover { background: #d97706; }
   </style>
 </head>
 <body>
 
   {% include 'nav_bar.html' %}
 
-  <div class="flags" style="position: fixed; bottom: 10px; right: 10px; display:flex; gap:8px;">
+  <div id="licenseBlocker" aria-live="polite" aria-atomic="true">
+    <h2 data-i18n="licenseExpiredTitle">🔒 License expired</h2>
+    <p data-i18n="licenseExpiredMsg">Please activate your license to continue using the dashboard.</p>
+    <a class="btn" href="/staff" data-i18n="activateLicense">Activate License</a>
+  </div>
+
+  <div class="flags" style="position: fixed; bottom: 10px; right: 10px; display:flex; gap:8px; z-index: 1000;">
     <div class="flag active" data-lang="da" title="Dansk" role="button" aria-pressed="true" tabindex="0" onclick="updateLanguage('da')" onkeydown="if(event.key==='Enter'||event.key===' '){updateLanguage('da'); event.preventDefault();}" style="width:40px;height:28px;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.12);display:inline-flex;align-items:center;justify-content:center;background:#fff;">
       <img src="/static/flags/da.svg" alt="Dansk" style="width:28px;height:20px;display:block;" />
     </div>
@@ -84,6 +96,15 @@
       await loadTranslations();
       applyI18n();
       updateLanguage(currentLang);
+      try {
+        const res = await fetch('/license_status');
+        if (res.ok) {
+          const data = await res.json();
+          if (!data.active) {
+            document.getElementById('licenseBlocker').style.display = 'flex';
+          }
+        }
+      } catch {}
     })();
 
     document.getElementById('manualForm').addEventListener('submit', async (e) => {

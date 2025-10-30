@@ -1,8 +1,13 @@
 from flask import Flask, request, jsonify, render_template
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel
-from db_manager import init_db
+from license_manager import (
+    ensure_token_db,
+    ensure_default_license,
+    get_current_expiry,
+    apply_token,
+)
 import sqlite3, os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 app = Flask(__name__)
 
@@ -90,6 +95,23 @@ def run_migrations():
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_started_at TEXT")
         if 'hold_accumulated' not in cols:
             cur.execute("ALTER TABLE customer_entries ADD COLUMN hold_accumulated INTEGER DEFAULT 0")
+        # Countdown will start upon number assignment
+        cur.execute("PRAGMA table_info(customer_entries)")
+        cols2 = [r[1] for r in cur.fetchall()]
+        if 'number_assigned_at' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN number_assigned_at TEXT")
+        if 'ticket_number' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN ticket_number INTEGER")
+        # Simple single-row counter for kiosk ticket numbers (1..99 roll-over)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS kiosk_counter (
+                id INTEGER PRIMARY KEY CHECK (id=1),
+                last_number INTEGER DEFAULT 0
+            )
+            """
+        )
+        cur.execute("INSERT OR IGNORE INTO kiosk_counter (id, last_number) VALUES (1, 0)")
         conn.commit()
     except sqlite3.OperationalError:
         # If locked during startup, ignore; next startup/run can add these.
@@ -97,14 +119,12 @@ def run_migrations():
     finally:
         conn.close()
 
-
-# Ensure the database and base tables exist as soon as the API module loads
+# Ensure license token DB and default license exist at startup (non-fatal if missing)
 try:
-    init_db()
-    run_migrations()
+    ensure_token_db()
+    ensure_default_license()
 except Exception as e:
-    # Don't crash the server if another process races to create/alter the DB
-    print(f"[startup] DB initialization warning: {e}")
+    print(f"[startup] License initialization warning: {e}")
 
 # ---------------------- LOOKUP ----------------------
 @app.route("/lookup", methods=["GET", "POST"])
@@ -156,15 +176,19 @@ def lookup_parcel():
     for e in rows:
         if e["status"] == 'hold':
             continue
+        # Start countdown only after number is assigned
+        num_at = e["number_assigned_at"] if isinstance(e, sqlite3.Row) else None
         try:
-            created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e["created_at"] else now
+            start_dt = datetime.strptime(num_at, "%Y-%m-%d %H:%M:%S") if num_at else None
         except Exception:
-            created_dt = now
+            start_dt = None
+        if not start_dt:
+            continue  # not started yet, do not expire
         hold_acc = int(e["hold_accumulated"] or 0)
         # if held, include ongoing hold duration, else only accumulated
         hold_total = hold_acc
         # not held now, so no extra ongoing hold
-        effective_elapsed = (now - created_dt).total_seconds() - hold_total
+        effective_elapsed = (now - start_dt).total_seconds() - hold_total
         if effective_elapsed >= 300:
             c2 = conn.cursor()
             c2.execute(
@@ -260,7 +284,8 @@ def lookup_parcel():
     cursor.execute(
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
-               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated
+               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
@@ -275,14 +300,14 @@ def lookup_parcel():
             "SELECT COUNT(*) FROM packets WHERE UPPER(provider)=UPPER(?) AND status='in_shop' AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)",
             (e["provider"], e["digits"], e["digits"], e["digits"]))
         e["matched"] = c2.fetchone()[0] > 0
-        # remaining time
-        try:
-            created_dt = datetime.strptime(e["created_at"].replace('T',' ').replace('Z',''), "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now
-        except Exception:
+        # remaining time starts after number_assigned_at
+        start_str = e.get("number_assigned_at")
+        start_dt = None
+        if start_str:
             try:
-                created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now
+                start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
             except Exception:
-                created_dt = now
+                start_dt = None
         hold_acc = int(e.get("hold_accumulated") or 0)
         hold_total = hold_acc
         if e.get("status") == 'hold' and e.get("hold_started_at"):
@@ -291,8 +316,11 @@ def lookup_parcel():
                 hold_total += int((now - hold_started).total_seconds())
             except Exception:
                 pass
-        effective_elapsed = (now - created_dt).total_seconds() - hold_total
-        e["remaining"] = max(0, 300 - int(effective_elapsed))
+        if start_dt:
+            effective_elapsed = (now - start_dt).total_seconds() - hold_total
+            e["remaining"] = max(0, 300 - int(effective_elapsed))
+        else:
+            e["remaining"] = 300
         e["held"] = e.get("status") == 'hold'
 
     # Normalize created_at for browser
@@ -345,10 +373,12 @@ def get_customer_entries():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 1️⃣ Identify expired (non-held) customer entries
+    # 1️⃣ Identify expired (non-held) customer entries (only after number assignment)
     cursor.execute("""
         SELECT id, provider, digits FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
+        WHERE status != 'hold'
+          AND number_assigned_at IS NOT NULL
+          AND number_assigned_at <= datetime('now', '-300 seconds')
     """)
     expired = cursor.fetchall()
 
@@ -385,7 +415,9 @@ def get_customer_entries():
     # 3️⃣ Delete expired customer entries
     cursor.execute("""
         DELETE FROM customer_entries
-        WHERE status != 'hold' AND created_at <= datetime('now', '-300 seconds')
+        WHERE status != 'hold'
+          AND number_assigned_at IS NOT NULL
+          AND number_assigned_at <= datetime('now', '-300 seconds')
     """)
     
     # 3.5️⃣ Backfill collection_id for entries that share the same code (LCN)
@@ -453,7 +485,8 @@ def get_customer_entries():
     cursor.execute(
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
-               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated
+               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
@@ -463,10 +496,13 @@ def get_customer_entries():
     now2 = datetime.utcnow()
     for e in entries:
         # compute remaining considering holds
-        try:
-            created_dt = datetime.strptime(e["created_at"], "%Y-%m-%d %H:%M:%S") if e.get("created_at") else now2
-        except Exception:
-            created_dt = now2
+        # Countdown starts after number assignment
+        start_dt = None
+        if e.get("number_assigned_at"):
+            try:
+                start_dt = datetime.strptime(e["number_assigned_at"], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                start_dt = None
         hold_total = int(e.get("hold_accumulated") or 0)
         if e.get("status") == 'hold' and e.get("hold_started_at"):
             try:
@@ -474,8 +510,11 @@ def get_customer_entries():
                 hold_total += int((now2 - hold_started).total_seconds())
             except Exception:
                 pass
-        effective_elapsed = (now2 - created_dt).total_seconds() - hold_total
-        e["remaining"] = max(0, 300 - int(effective_elapsed))
+        if start_dt:
+            effective_elapsed = (now2 - start_dt).total_seconds() - hold_total
+            e["remaining"] = max(0, 300 - int(effective_elapsed))
+        else:
+            e["remaining"] = 300
         e["held"] = e.get("status") == 'hold'
 
     # 5️⃣ Add match flag
@@ -854,10 +893,82 @@ def assign_collection():
     conn.close()
     return jsonify({"collection_id": collection_id})
 
+# ---------------------- KIOSK: CUSTOMER NUMBER (1..99) ----------------------
+@app.route("/assign_customer_number", methods=["POST"]) 
+def assign_customer_number():
+    data = request.get_json(silent=True) or {}
+    entry_ids = data.get("entry_ids")
+
+    conn = open_db()
+    cur = conn.cursor()
+    # Ensure the single row exists
+    cur.execute("INSERT OR IGNORE INTO kiosk_counter (id, last_number) VALUES (1, 0)")
+    # Use an immediate transaction to avoid race conditions for concurrent requests
+    try:
+        cur.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        # If cannot escalate lock, continue; UPDATE should still serialize under busy_timeout
+        pass
+    cur.execute("SELECT last_number FROM kiosk_counter WHERE id=1")
+    row = cur.fetchone()
+    last = int(row[0]) if row and row[0] is not None else 0
+    new_num = (last % 99) + 1
+    cur.execute("UPDATE kiosk_counter SET last_number=? WHERE id=1", (new_num,))
+    # If provided, mark the listed entries as having started countdown now, and store ticket number
+    if isinstance(entry_ids, list) and entry_ids:
+        placeholders = ",".join(["?"] * len(entry_ids))
+        cur.execute(
+            f"""
+            UPDATE customer_entries
+            SET number_assigned_at = strftime('%Y-%m-%d %H:%M:%S','now'),
+                ticket_number = ?
+            WHERE id IN ({placeholders})
+            """,
+            [new_num, *entry_ids]
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"number": new_num})
+
 # ---------------------- STAFF DASHBOARD + APIs ----------------------
 @app.route("/dashboard")
 def dashboard():
     return render_template("dashboard.html")
+
+@app.route("/staff", methods=["GET"])
+def staff_dashboard():
+    info = get_current_expiry()
+    return render_template("staff_dashboard.html", expiry=info.expiry_str, message=None, success=None)
+
+
+@app.route("/activate", methods=["POST"])
+def activate_token():
+    # Accept token from form or JSON
+    token = (request.form.get("token") if request.form else None) or (
+        (request.get_json(silent=True) or {}).get("token")
+    )
+    if not token:
+        info = get_current_expiry()
+        return render_template(
+            "staff_dashboard.html",
+            expiry=info.expiry_str,
+            message="Missing token",
+            success=False,
+        ), 400
+
+    success, message, info = apply_token(token)
+
+    if request.is_json:
+        payload = {"success": success, "message": message, "expiry": (info.expiry_str if info else get_current_expiry().expiry_str)}
+        return jsonify(payload), (200 if success else 400)
+
+    final_info = info or get_current_expiry()
+    return render_template(
+        "staff_dashboard.html",
+        expiry=final_info.expiry_str,
+        message=message,
+        success=success,
+    ), (200 if success else 400)
 
 @app.route("/all_parcels")
 def all_parcels():
@@ -919,6 +1030,22 @@ def delete_parcel_api():
     conn.close()
     return jsonify({"message": "Packet deleted."})
 
+# ---------------------- LICENSE STATUS (for UI gating) ----------------------
+@app.route("/license_status")
+def license_status():
+    try:
+        info = get_current_expiry()
+        today = date.today()
+        exp_dt = datetime.strptime(info.expiry_str, "%Y-%m-%d").date()
+        active = today <= exp_dt
+        return jsonify({
+            "expiry": info.expiry_str,
+            "today": today.strftime("%Y-%m-%d"),
+            "active": active
+        })
+    except Exception as e:
+        return jsonify({"error": "license_status_failed", "detail": str(e)}), 500
+
 # ---------------------- PUBLIC INSERT (for scanner or curl) ----------------------
 @app.route("/insert", methods=["POST"])
 def insert_packet():
@@ -945,8 +1072,7 @@ def insert_packet():
 
 
 if __name__ == "__main__":
-    # Create database and run lightweight migrations when launched directly
-    init_db()
+    # Run lightweight migrations once at startup to avoid ALTER TABLE during traffic
     run_migrations()
     print("🚀 API Server running with packets.db")
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
