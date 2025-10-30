@@ -73,12 +73,6 @@ async function loadEntries() {
 
   const now = new Date();
 
-  // Color palette for grouping by customer number (ticket_number)
-  const colors = [
-    '#fde68a', '#a7f3d0', '#bfdbfe', '#c7d2fe', '#fecaca',
-    '#fbcfe8', '#ddd6fe', '#bbf7d0', '#fed7aa', '#e9d5ff'
-  ];
-
   for (const row of data) {
     const createdAt = new Date(row.created_at);
     const elapsed = (now - createdAt) / 1000;
@@ -91,10 +85,9 @@ async function loadEntries() {
     const color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
-    const groupIdx = typeof row.ticket_number === 'number' && row.ticket_number > 0
-      ? (row.ticket_number - 1) % colors.length
-      : ((row.id || 0) % colors.length);
-    tr.style.background = colors[groupIdx];
+    const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
+    const groupIdx = ((basis - 1) % 10) + 1; // 1..10
+    tr.classList.add(`customer-color-${groupIdx}`);
 
   const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
   const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';

@@ -29,3 +29,15 @@ button {
 button:hover {
   opacity: 0.8;
 }
+
+/* Customer grouping colors (1..10) for live_customers rows */
+.customer-color-1 { background: #f4cccc; }
+.customer-color-2 { background: #ffe599; }
+.customer-color-3 { background: #d9ead3; }
+.customer-color-4 { background: #c9daf8; }
+.customer-color-5 { background: #ead1dc; }
+.customer-color-6 { background: #cfe2f3; }
+.customer-color-7 { background: #f9cb9c; }
+.customer-color-8 { background: #d0e0e3; }
+.customer-color-9 { background: #fff2cc; }
+.customer-color-10 { background: #ead1dc; }
