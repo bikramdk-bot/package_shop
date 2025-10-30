@@ -49,11 +49,10 @@
       <tr>
         <th data-i18n="colId">ID</th>
         <th data-i18n="assignCustomerNumber">Customer Number</th>
-        <th data-i18n="colCollection">Collection</th>
         <th data-i18n="colKode">Afhentningskode</th>
         <th data-i18n="colProvider">Provider</th>
         <th data-i18n="colDigits">Digits</th>
-        <th data-i18n="colHold">Hold</th>
+        <th data-i18n="colHold">Clock</th>
         <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
       </tr>
@@ -97,15 +96,14 @@ async function loadEntries() {
       : ((row.id || 0) % colors.length);
     tr.style.background = colors[groupIdx];
 
-    const holdStart = i18n?.[currentLang]?.holdStart || 'Start';
-    const holdPause = i18n?.[currentLang]?.holdPause || 'Pause';
+  const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
+  const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';
     const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
     const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
 
     tr.innerHTML = `
       <td>${row.id}</td>
       <td>${row.ticket_number ?? ''}</td>
-      <td>${row.collection_id ?? ''}</td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
