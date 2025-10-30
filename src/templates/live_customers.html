@@ -52,9 +52,9 @@
         <th data-i18n="colKode">Afhentningskode</th>
         <th data-i18n="colProvider">Provider</th>
         <th data-i18n="colDigits">Digits</th>
-        <th data-i18n="colStatus">Status</th>
+        <th data-i18n="colHold">Hold</th>
+        <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
-        <th data-i18n="btnHold">Hold</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -73,6 +73,12 @@ async function loadEntries() {
 
   const now = new Date();
 
+  // Color palette for grouping by customer number (ticket_number)
+  const colors = [
+    '#fde68a', '#a7f3d0', '#bfdbfe', '#c7d2fe', '#fecaca',
+    '#fbcfe8', '#ddd6fe', '#bbf7d0', '#fed7aa', '#e9d5ff'
+  ];
+
   for (const row of data) {
     const createdAt = new Date(row.created_at);
     const elapsed = (now - createdAt) / 1000;
@@ -81,17 +87,19 @@ async function loadEntries() {
 
     const tr = document.createElement('tr');
 
-    // color-code based on remaining time
+    // color-code remaining text and group background by ticket_number
     const color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
+    const groupIdx = typeof row.ticket_number === 'number' && row.ticket_number > 0
+      ? (row.ticket_number - 1) % colors.length
+      : ((row.id || 0) % colors.length);
+    tr.style.background = colors[groupIdx];
 
-    const statusText = row.held
-      ? (i18n?.[currentLang]?.statusPaused || 'PAUSED')
-      : (row.matched ? (i18n?.[currentLang]?.statusMatched||'MATCHED') : (i18n?.[currentLang]?.statusPending||'PENDING'));
-
-    const holdBtnLabel = i18n?.[currentLang]?.btnHold || 'Hold';
-    const resolveBtnLabel = i18n?.[currentLang]?.btnResolve || 'Resolve';
+    const holdStart = i18n?.[currentLang]?.holdStart || 'Start';
+    const holdPause = i18n?.[currentLang]?.holdPause || 'Pause';
+    const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
+    const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
 
     tr.innerHTML = `
       <td>${row.id}</td>
@@ -99,13 +107,15 @@ async function loadEntries() {
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
       <td>${row.digits}</td>
-      <td>${statusText}</td>
-      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
       <td>
-        ${row.held
-          ? `<button onclick="resolvePrompt(${row.id})">${resolveBtnLabel}</button>`
-          : `<button onclick="hold(${row.id})">${holdBtnLabel}</button>`}
+        <button onclick="holdStartEntry(${row.id})">${holdStart}</button>
+        <button onclick="holdPauseEntry(${row.id})">${holdPause}</button>
       </td>
+      <td>
+        <button onclick="deliveredEntry(${row.id})">${delivered}</button>
+        <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
+      </td>
+      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
     `;
 
     tbody.appendChild(tr);
@@ -128,7 +138,7 @@ function updateCountdowns() {
   });
 }
 
-async function hold(id) {
+async function holdStartEntry(id) {
   await fetch('/hold_entry', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -137,14 +147,13 @@ async function hold(id) {
   loadEntries(); // refresh after hold
 }
 
-function resolvePrompt(id){
-  const message = (i18n?.[currentLang]?.confirmCollected || 'Mark as Collected?\nPress Cancel to Keep in Shop.');
-  const choice = window.confirm(message);
-  if (choice) {
-    resolve(id, 'collected');
-  } else {
-    resolve(id, 'keep');
-  }
+async function holdPauseEntry(id) {
+  await fetch('/unhold_entry', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entry_id: id })
+  });
+  loadEntries();
 }
 
 async function resolve(id, action){
@@ -155,6 +164,9 @@ async function resolve(id, action){
   });
   loadEntries();
 }
+
+function deliveredEntry(id) { resolve(id, 'collected'); }
+function notDeliveredEntry(id) { resolve(id, 'keep'); }
 
 // refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);

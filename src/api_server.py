@@ -285,7 +285,7 @@ def lookup_parcel():
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
                hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
-               number_assigned_at
+               number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
@@ -486,7 +486,7 @@ def get_customer_entries():
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
                hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
-               number_assigned_at
+               number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
