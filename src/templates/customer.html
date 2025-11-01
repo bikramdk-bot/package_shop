@@ -112,6 +112,14 @@
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
+    /* small confirmation blink for auto-submit */
+    @keyframes blink {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.03); opacity: 0.9; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .blink { animation: blink 300ms ease-in-out; }
+
   /* License expired overlay */
   #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
   #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
@@ -175,7 +183,7 @@
       <div id="kodeBoxes" class="boxes"></div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="closeKode()" data-i18n="back">Tilbage</button>
-        <button class="btn btn-primary" onclick="submitCustomerEntryWithKode()" data-i18n="submit">Indsend</button>
+  <button id="kodeSubmitBtn" class="btn btn-primary" onclick="submitCustomerEntryWithKode()" data-i18n="submit">Indsend</button>
       </div>
       <div id="kodeMsg" class="msg"></div>
     </div>
@@ -279,7 +287,7 @@
 
       inputDigits = '';
       document.getElementById('message').textContent = '';
-  if (selectedProvider === 'DAO') targetLen = 4; // start with last 4 to find packet; kode asked later
+  if (selectedProvider === 'DAO') targetLen = 4; // start with last 4 (DAO uses kode modal later)
   else if (selectedProvider === 'Bring') targetLen = 5; // Bring asks 5-digit afhentningskode directly
   else if (selectedProvider === 'UPS') targetLen = 5; // UPS asks 5-digit collection code directly
   else targetLen = 4; // PostNord/GLS start with 4
@@ -307,16 +315,38 @@
       document.getElementById('helper').textContent = `${inputDigits.length}/${count}`;
       // attach key handler
       window.onkeydown = handleKey;
+      // clear any pending auto-submit when re-rendering boxes
+      if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; }
     }
 
+    // Auto-submit debounce timer (ms)
+    let autoSubmitTimer = null;
+    const AUTO_SUBMIT_DELAY = 300;
+  let kodeAutoTimer = null;
+
     function handleKey(e) {
-      if (e.key === 'Backspace') { inputDigits = inputDigits.slice(0, -1); renderInputBoxes(targetLen); focusActiveBox(); return; }
+      if (e.key === 'Backspace') { inputDigits = inputDigits.slice(0, -1); renderInputBoxes(targetLen); focusActiveBox(); if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; } return; }
       if (e.key === 'Enter') { handleSubmit(); return; }
       if (/^[0-9]$/.test(e.key)) {
+        // Allow input up to targetLen
         if (inputDigits.length < targetLen) {
           inputDigits += e.key;
           renderInputBoxes(targetLen);
           focusActiveBox();
+
+          // If we've reached the current target length, schedule auto-submit
+          if (inputDigits.length === targetLen) {
+            if (autoSubmitTimer) clearTimeout(autoSubmitTimer);
+            // small blink on the submit button to show confirmation
+            const btn = document.getElementById('submitBtn');
+            if (btn) {
+              btn.classList.remove('blink');
+              void btn.offsetWidth;
+              btn.classList.add('blink');
+              setTimeout(()=>btn.classList.remove('blink'), AUTO_SUBMIT_DELAY + 50);
+            }
+            autoSubmitTimer = setTimeout(() => { autoSubmitTimer = null; handleSubmit(); }, AUTO_SUBMIT_DELAY);
+          }
         }
       }
     }
@@ -329,6 +359,8 @@
 
     // --- Flow handlers ---
     async function handleSubmit() {
+      // clear any pending auto-submit timer to avoid duplicate calls
+      if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; }
       const msg = document.getElementById('message');
       msg.className = 'msg';
       if (!selectedProvider) { msg.textContent = (i18n?.[currentLang]?.chooseProvider)||'Vælg udbyder først'; return; }
@@ -439,7 +471,20 @@
       if (e.key === 'Backspace') { kodeDigits = kodeDigits.slice(0,-1); renderKodeBoxes(5); return; }
       if (e.key === 'Enter') { submitCustomerEntryWithKode(); return; }
       if (/^[0-9]$/.test(e.key)) {
-        if (kodeDigits.length < 5) { kodeDigits += e.key; renderKodeBoxes(5); }
+        if (kodeDigits.length < 5) {
+          kodeDigits += e.key; renderKodeBoxes(5);
+          // debounce auto-submit when we reach 5 digits
+          if (kodeDigits.length === 5) {
+            // blink modal submit button
+            const kbtn = document.getElementById('kodeSubmitBtn');
+            if (kbtn) {
+              kbtn.classList.remove('blink'); void kbtn.offsetWidth; kbtn.classList.add('blink');
+              setTimeout(()=>kbtn.classList.remove('blink'), AUTO_SUBMIT_DELAY + 50);
+            }
+            if (typeof kodeAutoTimer !== 'undefined' && kodeAutoTimer) clearTimeout(kodeAutoTimer);
+            kodeAutoTimer = setTimeout(() => { kodeAutoTimer = null; submitCustomerEntryWithKode(); }, AUTO_SUBMIT_DELAY);
+          }
+        }
       }
     }
     async function submitCustomerEntryWithKode() {
