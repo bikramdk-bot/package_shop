@@ -48,9 +48,9 @@
     <thead>
       <tr>
         <th data-i18n="assignCustomerNumber">Customer Number</th>
+        <th data-i18n="colDigits">Digits</th>
         <th data-i18n="colKode">Afhentningskode</th>
         <th data-i18n="colProvider">Provider</th>
-        <th data-i18n="colDigits">Digits</th>
         <th data-i18n="colHold">Clock</th>
         <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
@@ -95,9 +95,9 @@ async function loadEntries() {
 
     tr.innerHTML = `
       <td>${row.ticket_number ?? ''}</td>
+      <td><strong>${row.digits}</strong></td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
-      <td>${row.digits}</td>
       <td>
         <button onclick="holdStartEntry(${row.id})">${holdStart}</button>
         <button onclick="holdPauseEntry(${row.id})">${holdPause}</button>
