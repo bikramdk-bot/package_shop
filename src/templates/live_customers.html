@@ -80,13 +80,21 @@ async function loadEntries() {
 
     const tr = document.createElement('tr');
 
-    // color-code remaining text and group background by ticket_number
+    // color-code remaining text. Group background is only applied for finalized entries
     const color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
-    const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
-    const groupIdx = ((basis - 1) % 10) + 1; // 1..10
-    tr.classList.add(`customer-color-${groupIdx}`);
+
+    // Determine whether this entry is considered "finalized" for coloring.
+    // We treat entries with an assigned ticket_number or a collection_id as finalized.
+    const isFinalized = (typeof row.ticket_number === 'number' && row.ticket_number > 0) || (!!row.collection_id);
+    if (isFinalized) {
+      const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
+      const groupIdx = ((basis - 1) % 10) + 1; // 1..10
+      tr.classList.add(`customer-color-${groupIdx}`);
+    } else {
+      // ensure no group class is set; keep default (white) background
+    }
 
   const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
   const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';
