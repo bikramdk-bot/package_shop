@@ -47,7 +47,6 @@
   <table id="table">
     <thead>
       <tr>
-        <th data-i18n="colId">ID</th>
         <th data-i18n="assignCustomerNumber">Customer Number</th>
         <th data-i18n="colKode">Afhentningskode</th>
         <th data-i18n="colProvider">Provider</th>
@@ -95,7 +94,6 @@ async function loadEntries() {
     const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
 
     tr.innerHTML = `
-      <td>${row.id}</td>
       <td>${row.ticket_number ?? ''}</td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
