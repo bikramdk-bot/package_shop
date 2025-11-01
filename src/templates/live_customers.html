@@ -47,13 +47,11 @@
   <table id="table">
     <thead>
       <tr>
-        <th data-i18n="colId">ID</th>
         <th data-i18n="assignCustomerNumber">Customer Number</th>
-        <th data-i18n="colKode">Afhentningskode</th>
-        <th data-i18n="colProvider">Provider</th>
         <th data-i18n="colDigits">Digits</th>
-        <th data-i18n="colHold">Clock</th>
-        <th data-i18n="colCollectionActions">Collection</th>
+        <th data-i18n="colKode">Afhentningskode</th>
+  <th data-i18n="colProvider">Provider</th>
+  <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
       </tr>
     </thead>
@@ -81,13 +79,21 @@ async function loadEntries() {
 
     const tr = document.createElement('tr');
 
-    // color-code remaining text and group background by ticket_number
+    // color-code remaining text. Group background is only applied for finalized entries
     const color =
       remaining <= 15 ? 'red' :
       remaining <= 60 ? 'orange' : 'green';
-    const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
-    const groupIdx = ((basis - 1) % 10) + 1; // 1..10
-    tr.classList.add(`customer-color-${groupIdx}`);
+
+    // Determine whether this entry is considered "finalized" for coloring.
+    // We treat entries with an assigned ticket_number or a collection_id as finalized.
+    const isFinalized = (typeof row.ticket_number === 'number' && row.ticket_number > 0) || (!!row.collection_id);
+    if (isFinalized) {
+      const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
+      const groupIdx = ((basis - 1) % 10) + 1; // 1..10
+      tr.classList.add(`customer-color-${groupIdx}`);
+    } else {
+      // ensure no group class is set; keep default (white) background
+    }
 
   const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
   const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';
@@ -95,23 +101,51 @@ async function loadEntries() {
     const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
 
     tr.innerHTML = `
-      <td>${row.id}</td>
       <td>${row.ticket_number ?? ''}</td>
+      <td><strong>${row.digits}</strong></td>
       <td>${row.kode ?? ''}</td>
       <td>${row.provider}</td>
-      <td>${row.digits}</td>
-      <td>
-        <button onclick="holdStartEntry(${row.id})">${holdStart}</button>
-        <button onclick="holdPauseEntry(${row.id})">${holdPause}</button>
-      </td>
       <td>
         <button onclick="deliveredEntry(${row.id})">${delivered}</button>
         <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
       </td>
-      <td class="countdown" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" style="color:${color}">${remaining.toFixed(0)}s</td>
+      <td class="countdown" data-entry-id="${row.id}" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" data-paused="0" style="color:${color}; display:flex; gap:8px; align-items:center; justify-content:center;">
+        <button aria-label="Pause/Resume" title="Pause/Resume" onclick="togglePause(${row.id})" style="background:none;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;">
+          <!-- default: red pause icon (will toggle to green play when paused) -->
+          <svg id="icon-${row.id}" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+            <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+          </svg>
+        </button>
+        <span class="time-text">${remaining.toFixed(0)}s</span>
+      </td>
     `;
 
     tbody.appendChild(tr);
+    // After inserting row, restore paused state from localStorage if present
+    try {
+      const pausedMap = JSON.parse(localStorage.getItem('livePausedEntries') || '{}');
+      const pid = String(row.id);
+      const cell = tbody.querySelector(`.countdown[data-entry-id="${row.id}"]`);
+      if (cell) {
+        if (pausedMap[pid]) {
+          // use stored remaining value and mark paused
+          cell.dataset.paused = '1';
+          cell.dataset.remaining = String(pausedMap[pid]);
+          const timeSpan = cell.querySelector('.time-text');
+          if (timeSpan) { timeSpan.textContent = `${pausedMap[pid]}s`; timeSpan.style.color = (pausedMap[pid] <= 15 ? 'red' : pausedMap[pid] <= 60 ? 'orange' : 'green'); }
+          // toggle icon to green play
+          const icon = document.getElementById(`icon-${row.id}`);
+          if (icon) {
+            icon.innerHTML = '<path d="M5 3v18l15-9z"/>'; // play triangle
+            icon.setAttribute('stroke', 'green');
+            icon.setAttribute('fill', 'green');
+          }
+        } else {
+          cell.dataset.paused = '0';
+        }
+      }
+    } catch (e) { /* ignore localStorage parse errors */ }
   }
 }
 
@@ -119,15 +153,20 @@ function updateCountdowns() {
   const cells = document.querySelectorAll('.countdown');
   cells.forEach(cell => {
     const held = cell.dataset.held === '1';
+    const paused = cell.dataset.paused === '1';
     let remaining = parseInt(cell.dataset.remaining || '0', 10);
-    if (!held && remaining > 0) {
+    // Do not decrement if paused or held
+    if (!held && !paused && remaining > 0) {
       remaining -= 1;
       cell.dataset.remaining = String(remaining);
     }
-    cell.textContent = `${remaining}s`;
-    cell.style.color =
-      remaining <= 15 ? 'red' :
-      remaining <= 60 ? 'orange' : 'green';
+    // update displayed time text (preserve other children like icon/button)
+    const timeSpan = cell.querySelector('.time-text');
+    if (timeSpan) timeSpan.textContent = `${remaining}s`;
+    // color the time text according to remaining
+    const color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
+    // apply to the time text only
+    if (timeSpan) timeSpan.style.color = color;
   });
 }
 
@@ -160,6 +199,38 @@ async function resolve(id, action){
 
 function deliveredEntry(id) { resolve(id, 'collected'); }
 function notDeliveredEntry(id) { resolve(id, 'keep'); }
+
+// --- Pause / resume per-row (client-side, persisted in localStorage) ---
+function togglePause(entryId) {
+  try {
+    const key = String(entryId);
+    const map = JSON.parse(localStorage.getItem('livePausedEntries') || '{}');
+    const cell = document.querySelector(`.countdown[data-entry-id="${entryId}"]`);
+    if (!cell) return;
+    const paused = cell.dataset.paused === '1';
+    const timeSpan = cell.querySelector('.time-text');
+    const icon = document.getElementById(`icon-${entryId}`);
+    let remaining = parseInt(cell.dataset.remaining || '0', 10);
+    if (!paused) {
+      // Pause: store remaining and switch icon to play (green)
+      map[key] = remaining;
+      localStorage.setItem('livePausedEntries', JSON.stringify(map));
+      cell.dataset.paused = '1';
+      if (icon) { icon.innerHTML = '<path d="M5 3v18l15-9z"/>'; icon.setAttribute('stroke','green'); icon.setAttribute('fill','green'); }
+    } else {
+      // Resume: remove stored entry and switch icon back to pause (red)
+      delete map[key];
+      localStorage.setItem('livePausedEntries', JSON.stringify(map));
+      cell.dataset.paused = '0';
+      if (icon) {
+        icon.innerHTML = '<rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect>';
+        icon.setAttribute('stroke','red'); icon.removeAttribute('fill');
+      }
+    }
+  } catch (e) {
+    console.warn('togglePause error', e);
+  }
+}
 
 // refresh table every 2s, update timers every 1s
 setInterval(loadEntries, 2000);
