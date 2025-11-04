@@ -802,8 +802,14 @@ def scan_and_print():
     barcode = (data.get("barcode") or "").strip() or None
     printer = (data.get("printer_device") or "").strip() or PRINTER_DEVICE
 
-    if not lcn or not digits:
-        return jsonify({"error": "Missing lcn or digits"}), 400
+    # Require digits; allow lcn to be omitted (scanner sends provider instead).
+    if not digits:
+        return jsonify({"error": "Missing digits"}), 400
+
+    # If caller didn't include explicit 'lcn', fall back to the provided 'provider'
+    # (scanner sends 'provider' but not 'lcn'). This preserves backward compatibility.
+    if not lcn:
+        lcn = provider
 
 
     # Insert into DB (lookup.insert_parcel returns a dict with message or warning)
