@@ -37,7 +37,7 @@ def process_barcode(code: str) -> str:
         return code[-11:-7]
     return code[-4:]
 
-def send_to_printer(lcn, digits):
+def send_to_printer(lcn, digits, raw_barcode):
     # Build ZPL (keep same format as api_server)
     today = datetime.now().strftime("%d-%m-%y")
     zpl = f"""^XA
@@ -55,9 +55,10 @@ def send_to_printer(lcn, digits):
     use_api = os.environ.get("PRINT_VIA_API", "1").lower() in ("1", "true", "yes")
 
     if use_api:
-        provider = os.environ.get("SCANNER_PROVIDER", "UNKNOWN")
-        # include raw barcode string as 'barcode' for DB insert
-        payload = {"provider": provider, "lcn": lcn, "digits": digits, "barcode": digits}
+        # The provider is the LCN from the scanner logic (provider and LCN are the same)
+        provider = lcn
+        # include raw barcode string as 'barcode' for DB insert (send raw, not processed digits)
+        payload = {"provider": provider, "lcn": lcn, "digits": digits, "barcode": raw_barcode}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request("http://127.0.0.1:5000/scan_and_print", data=data, headers={"Content-Type": "application/json"})
         try:
@@ -144,7 +145,8 @@ def main():
                                     if current_lcn:
                                         digits = process_barcode(buffer)
                                         print("Barcode:", buffer, "→", digits, "| LCN:", current_lcn)
-                                        send_to_printer(current_lcn, digits)
+                                        # pass the raw scanned barcode (buffer) so DB gets raw value
+                                        send_to_printer(current_lcn, digits, buffer)
                                     else:
                                         print("Error: No LCN set yet.")
                                 buffer = ""
