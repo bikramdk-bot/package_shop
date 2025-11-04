@@ -14,6 +14,40 @@ app = Flask(__name__)
 # Use the exact same DB path as other modules (lookup.py/db_manager.py)
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 
+# Default printer device (can be overridden by environment or request)
+PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
+
+
+def _build_zpl(lcn: str, digits: str) -> str:
+    """Return ZPL for given LCN and digits."""
+    now = datetime.now()
+    today = f"{now.day}-{now.month}-{now.strftime('%y')}"
+    return f"""^XA
+^PW394
+^LL236
+^FO280,10^A0N,25,25^FD{today}^FS
+^FO10,10^A0N,50,50^FD{lcn}^FS
+^FO35,90^A0N,170,170^FD{digits}^FS
+^XZ
+"""
+
+
+def _write_zpl_to_device(zpl: str, printer: str) -> None:
+    """Write ZPL string to the given printer device path.
+
+    Raises an exception if the write fails.
+    """
+    # Ensure parent dir exists for file paths (no-op for device nodes)
+    try:
+        parent = os.path.dirname(printer)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    except Exception:
+        pass
+
+    with open(printer, "wb") as p:
+        p.write(zpl.encode("utf-8"))
+
 # ---------- SQLite helpers ----------
 def open_db():
     """Open a SQLite connection configured for concurrent reads/writes."""
@@ -728,6 +762,63 @@ def live_customers():
 def manual_label_page():
     return render_template("manual_label.html")
 
+
+@app.route("/print_label", methods=["POST"])
+def print_label():
+    """Print a label using ZPL. Expects JSON { lcn, digits, printer_device (optional) }.
+    This mirrors the ZPL used by the local `scanner_listener.py` so the scanner can POST
+    the label payload to the API instead of writing the device directly.
+    """
+    data = request.get_json(force=True) or {}
+    lcn = (data.get("lcn") or "").strip()
+    digits = (data.get("digits") or "").strip()
+    printer = (data.get("printer_device") or "").strip() or PRINTER_DEVICE
+
+    if not lcn or not digits:
+        return jsonify({"error": "Missing lcn or digits"}), 400
+
+    # Build a date string similar to the scanner helper (avoid platform-specific %- modifiers)
+    zpl = _build_zpl(lcn, digits)
+    try:
+        _write_zpl_to_device(zpl, printer)
+    except Exception as e:
+        return jsonify({"error": "Failed to write to printer device", "details": str(e)}), 500
+
+    return jsonify({"status": "printed", "lcn": lcn, "digits": digits, "printer": printer})
+
+
+@app.route("/scan_and_print", methods=["POST"])
+def scan_and_print():
+    """Insert a scanned parcel into the DB and print a label.
+
+    Expects JSON: { provider (optional), lcn, digits, barcode (optional), printer_device (optional) }
+    Returns combined JSON with DB result and print status.
+    """
+    data = request.get_json(force=True) or {}
+    provider = (data.get("provider") or "").strip() or "UNKNOWN"
+    lcn = (data.get("lcn") or "").strip()
+    digits = (data.get("digits") or "").strip()
+    barcode = (data.get("barcode") or "").strip() or None
+    printer = (data.get("printer_device") or "").strip() or PRINTER_DEVICE
+
+    if not lcn or not digits:
+        return jsonify({"error": "Missing lcn or digits"}), 400
+
+    # Insert into DB (lookup.insert_parcel returns a dict with message or warning)
+    try:
+        db_result = insert_parcel(provider, digits, barcode)
+    except Exception as e:
+        return jsonify({"error": "DB insert failed", "details": str(e)}), 500
+
+    # Print label
+    try:
+        zpl = _build_zpl(lcn, digits)
+        _write_zpl_to_device(zpl, printer)
+    except Exception as e:
+        return jsonify({"error": "Printed failed", "details": str(e), "db": db_result}), 500
+
+    return jsonify({"status": "ok", "db": db_result, "printed": {"lcn": lcn, "digits": digits, "printer": printer}})
+
 # ---------------------- KIOSK: CREATE ENTRY + ASSIGN COLLECTION ----------------------
 @app.route("/customer_entry", methods=["POST"])
 def create_customer_entry():
@@ -1075,4 +1166,8 @@ if __name__ == "__main__":
     # Run lightweight migrations once at startup to avoid ALTER TABLE during traffic
     run_migrations()
     print("🚀 API Server running with packets.db")
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    # Disable the Werkzeug reloader so startup actions (like launching scanner)
+    # aren't executed twice (parent + child) which can cause exclusive device
+    # grabs to fail. If you rely on the reloader, start the scanner only when
+    # WERKZEUG_RUN_MAIN=="true".
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)

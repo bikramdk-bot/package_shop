@@ -1,46 +1,173 @@
-# src/scanner_listener.py
-import sys
+#!/usr/bin/env python3
+from datetime import datetime
+from evdev import InputDevice, ecodes
+import os
 import time
-from lookup import insert_parcel
+import traceback
+import json
+import urllib.request
+import urllib.error
 
-def get_provider_from_prefix(barcode: str):
-    """Simple logic to detect provider from barcode prefix."""
-    if barcode.startswith("0037") or barcode.startswith("731"):
-        return "PostNord"
-    elif barcode.startswith("570"):
-        return "DAO"
-    elif barcode.startswith("1Z"):
-        return "UPS"
-    elif barcode.startswith("JJD"):
-        return "DHL"
-    else:
-        return "Unknown"
+# --- CONFIG ---
+PRINTER_DEVICE = "/dev/usb/lp0"
+SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 
+SPECIAL_LCN_MATCH = "SOME_LONG_LCN_PREFIX_OR_EXACT"
+STRIP_LAST_5_FOR_SPECIAL = True
 
-def handle_scan(barcode: str):
-    """Process one scanned barcode string."""
-    provider = get_provider_from_prefix(barcode)
-    digits = barcode[-4:]
-    insert_parcel(provider, digits)
+current_lcn = None
 
+KEYMAP = {
+    2:"1",3:"2",4:"3",5:"4",6:"5",7:"6",8:"7",9:"8",10:"9",11:"0",
+    16:"q",17:"w",18:"e",19:"r",20:"t",21:"y",22:"u",23:"i",24:"o",25:"p",
+    30:"a",31:"s",32:"d",33:"f",34:"g",35:"h",36:"j",37:"k",38:"l",
+    44:"z",45:"x",46:"c",47:"v",48:"b",49:"n",50:"m",
+    28:"ENTER"
+}
 
-def listen_scanner():
-    """Continuously read from stdin (HID scanner)."""
-    print("🔎 Listening for scanner input... (press Ctrl+C to stop)\n")
+SHIFT_CODES = {42, 54}  # left/right shift
+
+def process_barcode(code: str) -> str:
+    code = code.strip().upper()
+    if len(code) >= 4 and code[-2:].isdigit():
+        return code[-4:]
+    if len(code) >= 6 and code[-2:] in ("DE", "SE"):
+        return code[-6:-2]
+    if len(code) >= 11 and code[-1].isalpha() and code[-2].isdigit():
+        return code[-11:-7]
+    return code[-4:]
+
+def send_to_printer(lcn, digits):
+    # Build ZPL (keep same format as api_server)
+    today = datetime.now().strftime("%d-%m-%y")
+    zpl = f"""^XA
+^PW394
+^LL236
+^FO280,10^A0N,25,25^FD{today}^FS
+^FO10,10^A0N,50,50^FD{lcn}^FS
+^FO35,90^A0N,170,170^FD{digits}^FS
+^XZ
+"""
+
+    # By default prefer printing via the local API endpoint so the API
+    # process owns the printer device. Override with PRINT_VIA_API=0 to
+    # write directly to the device from this process.
+    use_api = os.environ.get("PRINT_VIA_API", "1").lower() in ("1", "true", "yes")
+
+    if use_api:
+        provider = os.environ.get("SCANNER_PROVIDER", "UNKNOWN")
+        # include raw barcode string as 'barcode' for DB insert
+        payload = {"provider": provider, "lcn": lcn, "digits": digits, "barcode": digits}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request("http://127.0.0.1:5000/scan_and_print", data=data, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp_body = resp.read().decode("utf-8")
+                print("Printed via API, response:", resp.status, resp_body)
+                return
+        except Exception as e:
+            print("Warning: API print failed, falling back to direct device write:", e)
+
+    # Fallback: write directly to printer device
+    print("sending to printer (direct):\n", zpl)
+    try:
+        with open(PRINTER_DEVICE, "wb") as p:
+            p.write(zpl.encode("utf-8"))
+    except Exception as e:
+        print("Error: failed to write to printer device:", e)
+
+def main():
+    global current_lcn
+    device = InputDevice(SCANNER_PATH)
     buffer = ""
-    while True:
-        char = sys.stdin.read(1)
-        if char == "\n":
-            barcode = buffer.strip()
-            if barcode:
-                handle_scan(barcode)
-            buffer = ""
-        else:
-            buffer += char
+    shift_active = False
+    # Startup diagnostics
+    try:
+        import sys
+        print("Service mode: listening on", device.path)
+        print("PID", os.getpid(), "PPID", os.getppid(), "UID", os.geteuid(), "CWD", os.getcwd(), "PYEXE", sys.executable)
+    except Exception:
+        print("Service mode: listening on", device.path)
 
+    # Robust device grab: optionally disable via DISABLE_EVDEV_GRAB=1
+    disable_grab = os.environ.get("DISABLE_EVDEV_GRAB", "0").lower() in ("1", "true", "yes")
+    def try_grab(dev, retries=5, delay=0.8):
+        if disable_grab:
+            print("Device grab disabled via DISABLE_EVDEV_GRAB")
+            return False
+        # If not root, warn (grab may fail due to permissions)
+        try:
+            euid = os.geteuid()
+        except Exception:
+            euid = None
+        if euid is not None and euid != 0:
+            print(f"Note: running as uid={euid}; grab may require root or input group membership")
+
+        for attempt in range(1, retries + 1):
+            try:
+                dev.grab()
+                print(f"Device grabbed successfully on attempt {attempt}")
+                return True
+            except Exception as e:
+                # Print exception details to help debugging
+                print(f"Warning: device.grab() attempt {attempt} failed: {e}")
+                if attempt < retries:
+                    time.sleep(delay)
+        # Failed all attempts; continue in non-exclusive mode
+        print("Warning: could not grab device exclusively after retries; proceeding without exclusive grab")
+        return False
+
+    grabbed = try_grab(device)
+
+    try:
+        for event in device.read_loop():
+            if event.type == ecodes.EV_KEY:
+                if event.code in SHIFT_CODES:
+                    if event.value == 1:
+                        shift_active = True
+                    elif event.value == 0:
+                        shift_active = False
+                elif event.value == 1:
+                    key = KEYMAP.get(event.code)
+                    if key:
+                        if key == "ENTER":
+                            if buffer:
+                                if buffer.isalpha():
+                                    lcn = buffer.upper()
+                                    if STRIP_LAST_5_FOR_SPECIAL and (
+                                        lcn == SPECIAL_LCN_MATCH or lcn.startswith(SPECIAL_LCN_MATCH)
+                                    ) and len(lcn) > 5:
+                                        lcn = lcn[:-5]
+                                    current_lcn = lcn
+                                    print("Stored LCN:", current_lcn)
+                                else:
+                                    if current_lcn:
+                                        digits = process_barcode(buffer)
+                                        print("Barcode:", buffer, "→", digits, "| LCN:", current_lcn)
+                                        send_to_printer(current_lcn, digits)
+                                    else:
+                                        print("Error: No LCN set yet.")
+                                buffer = ""
+                        else:
+                            if shift_active:
+                                buffer += key.upper()
+                            else:
+                                buffer += key
+    except KeyboardInterrupt:
+        print("scanner_listener: interrupted by user")
+    except Exception:
+        print("scanner_listener: unexpected error:\n", traceback.format_exc())
+    finally:
+        # Attempt to release grab if we successfully grabbed it
+        try:
+            if 'grabbed' in locals() and grabbed:
+                try:
+                    device.ungrab()
+                    print("Device ungrabbed")
+                except Exception as e:
+                    print("Warning: failed to ungrab device:", e)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
-    try:
-        listen_scanner()
-    except KeyboardInterrupt:
-        print("\n🛑 Scanner listener stopped.")
+    main()
