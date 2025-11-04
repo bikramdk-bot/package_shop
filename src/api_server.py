@@ -777,6 +777,7 @@ def print_label():
     if not lcn or not digits:
         return jsonify({"error": "Missing lcn or digits"}), 400
 
+
     # Build a date string similar to the scanner helper (avoid platform-specific %- modifiers)
     zpl = _build_zpl(lcn, digits)
     try:
@@ -803,6 +804,7 @@ def scan_and_print():
 
     if not lcn or not digits:
         return jsonify({"error": "Missing lcn or digits"}), 400
+
 
     # Insert into DB (lookup.insert_parcel returns a dict with message or warning)
     try:

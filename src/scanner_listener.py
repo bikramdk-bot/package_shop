@@ -43,7 +43,6 @@ def is_lcn(s: str) -> bool:
 
     Heuristics used:
     - Matches SPECIAL_LCN_MATCH exactly or as a prefix
-    - Contains any letter (so alphanumeric LCNs are accepted)
     - Or is purely alphabetic (legacy behavior)
     - Minimum length guard to avoid treating short tokens as LCNs
     """
@@ -53,12 +52,11 @@ def is_lcn(s: str) -> bool:
     su = s.upper()
     if SPECIAL_LCN_MATCH and (su == SPECIAL_LCN_MATCH or su.startswith(SPECIAL_LCN_MATCH)):
         return True
-    # Pure alphabetic (old behavior)
+    # Only accept pure alphabetic LCNs (legacy behavior preserved). This enforces
+    # that LCNs are composed of letters only (A-Z).
     if su.isalpha() and len(su) >= 2:
         return True
-    # If it contains any letters and is reasonably long, treat as LCN (covers alphanumeric LCNs)
-    if any(ch.isalpha() for ch in su) and len(su) >= 4:
-        return True
+
     return False
 
 def send_to_printer(lcn, digits, raw_barcode):
