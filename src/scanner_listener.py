@@ -37,6 +37,30 @@ def process_barcode(code: str) -> str:
         return code[-11:-7]
     return code[-4:]
 
+
+def is_lcn(s: str) -> bool:
+    """Return True if the scanned buffer should be treated as an LCN.
+
+    Heuristics used:
+    - Matches SPECIAL_LCN_MATCH exactly or as a prefix
+    - Contains any letter (so alphanumeric LCNs are accepted)
+    - Or is purely alphabetic (legacy behavior)
+    - Minimum length guard to avoid treating short tokens as LCNs
+    """
+    if not s:
+        return False
+    s = s.strip()
+    su = s.upper()
+    if SPECIAL_LCN_MATCH and (su == SPECIAL_LCN_MATCH or su.startswith(SPECIAL_LCN_MATCH)):
+        return True
+    # Pure alphabetic (old behavior)
+    if su.isalpha() and len(su) >= 2:
+        return True
+    # If it contains any letters and is reasonably long, treat as LCN (covers alphanumeric LCNs)
+    if any(ch.isalpha() for ch in su) and len(su) >= 4:
+        return True
+    return False
+
 def send_to_printer(lcn, digits, raw_barcode):
     # Build ZPL (keep same format as api_server)
     today = datetime.now().strftime("%d-%m-%y")
@@ -58,7 +82,8 @@ def send_to_printer(lcn, digits, raw_barcode):
         # The provider is the LCN from the scanner logic (provider and LCN are the same)
         provider = lcn
         # include raw barcode string as 'barcode' for DB insert (send raw, not processed digits)
-        payload = {"provider": provider, "lcn": lcn, "digits": digits, "barcode": raw_barcode}
+        # avoid redundancy: do not send 'lcn' since 'provider' already carries that value
+        payload = {"provider": provider, "digits": digits, "barcode": raw_barcode}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request("http://127.0.0.1:5000/scan_and_print", data=data, headers={"Content-Type": "application/json"})
         try:
@@ -133,7 +158,8 @@ def main():
                     if key:
                         if key == "ENTER":
                             if buffer:
-                                if buffer.isalpha():
+                                # Use a more robust LCN detection instead of buffer.isalpha()
+                                if is_lcn(buffer):
                                     lcn = buffer.upper()
                                     if STRIP_LAST_5_FOR_SPECIAL and (
                                         lcn == SPECIAL_LCN_MATCH or lcn.startswith(SPECIAL_LCN_MATCH)
