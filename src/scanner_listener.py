@@ -7,12 +7,17 @@ import traceback
 import json
 import urllib.request
 import urllib.error
+import re
 
 # --- CONFIG ---
 PRINTER_DEVICE = "/dev/usb/lp0"
 SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 
-SPECIAL_LCN_MATCH = "SOME_LONG_LCN_PREFIX_OR_EXACT"
+# When set to a non-empty string, a scanned value equal to or starting with
+# this value will be treated as an LCN (special-case). Leave empty by
+# default to avoid accidental matches with numeric barcodes that happen to
+# contain a known substring.
+SPECIAL_LCN_MATCH = ""
 STRIP_LAST_5_FOR_SPECIAL = True
 
 current_lcn = None
@@ -50,11 +55,14 @@ def is_lcn(s: str) -> bool:
         return False
     s = s.strip()
     su = s.upper()
+    # Honor an explicit special match if configured
     if SPECIAL_LCN_MATCH and (su == SPECIAL_LCN_MATCH or su.startswith(SPECIAL_LCN_MATCH)):
         return True
-    # Only accept pure alphabetic LCNs (legacy behavior preserved). This enforces
-    # that LCNs are composed of letters only (A-Z).
-    if su.isalpha() and len(su) >= 2:
+
+    # Treat only purely alphabetic tokens as LCNs. This avoids classifying
+    # mixed alphanumeric strings (e.g. "1231232131H") as LCNs — those are
+    # barcodes and should be handled by the barcode path.
+    if re.fullmatch(r"[A-Z]+", su) and len(su) >= 2:
         return True
 
     return False
