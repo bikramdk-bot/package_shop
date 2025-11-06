@@ -31,8 +31,9 @@ if SECRET_SALT == "SALT1234":
     # Informative message for developers (no secret management in repo)
     print("[License] WARNING: using default SECRET_SALT; set PACKAGE_SHOP_SECRET_SALT in env for production")
 
-# Device CPU id binding (prefer environment variable); default embedded value
-DEVICE_CPU_ID = os.environ.get("PACKAGE_SHOP_CPU_ID") or "00000000f3b8f9de"
+# Device CPU id binding: no default. This module is intended to run on the Raspberry Pi
+# and will detect the device serial from /proc/cpuinfo. Tokens are Pi-only.
+DEVICE_CPU_ID = os.environ.get("PACKAGE_SHOP_CPU_ID") or None
 
 # Base directory (src/)
 BASE_DIR = Path(__file__).resolve().parent
@@ -177,6 +178,32 @@ def _hmac_sha256_hex(key: str, msg: str) -> str:
     return hmac.new(key.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def get_local_cpu_id() -> Optional[str]:
+    """Detect CPU id from /proc/cpuinfo (Raspberry Pi).
+
+    This function is intended to run on the Raspberry Pi. It reads the
+    Serial field from /proc/cpuinfo and returns it. If not running on
+    Linux or the serial cannot be read, return None.
+    """
+    try:
+        import platform
+
+        if platform.system() != "Linux":
+            return None
+        cpuinfo = Path("/proc/cpuinfo")
+        if not cpuinfo.exists():
+            return None
+        text = cpuinfo.read_text(encoding="utf-8", errors="ignore")
+        for line in text.splitlines():
+            if line.lower().startswith("serial"):
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    return parts[1].strip()
+    except Exception:
+        pass
+    return None
+
+
 def parse_token(token: str, cpu_id: Optional[str] = None) -> Tuple[str, int, str, str]:
     """Return tuple (shop_id, months, rand4, mac6) or raise ValueError.
     Only supports the current short format: RAND4 (4 hex) and MAC6 (6 hex) using HMAC-SHA256.
@@ -205,8 +232,11 @@ def parse_token(token: str, cpu_id: Optional[str] = None) -> Tuple[str, int, str
     if not mac or len(mac) != 6 or any(ch not in HEX_UPPER for ch in mac):
         raise ValueError("Invalid checksum section")
 
-    # determine cpu_id to use for verification
-    cpu = (cpu_id or DEVICE_CPU_ID).strip()
+    # determine cpu_id to use for verification (prefer explicit, then configured/detected)
+    cpu = cpu_id or get_local_cpu_id()
+    if not cpu:
+        raise ValueError("No device CPU id available for token verification; must run on Raspberry Pi (Serial in /proc/cpuinfo) or set PACKAGE_SHOP_CPU_ID")
+    cpu = str(cpu).strip()
     msg = f"{shop_id}|{months}|{rand}|{cpu}"
     expected = _hmac_sha256_hex(SECRET_SALT, msg)[:6].upper()
     if not hmac.compare_digest(expected, mac.upper()):
@@ -297,7 +327,10 @@ def generate_token(shop_id: str, months: int, cpu_id: Optional[str] = None) -> s
         raise ValueError("months must be positive")
     # 4 hex chars of crypto random (shorter for UI entry)
     rand4 = secrets.token_hex(2).upper()
-    cpu = (cpu_id or DEVICE_CPU_ID).strip()
+    cpu = cpu_id or get_local_cpu_id()
+    if not cpu:
+        raise ValueError("cpu_id is required to generate a token; must run on Raspberry Pi or set PACKAGE_SHOP_CPU_ID")
+    cpu = str(cpu).strip()
     msg = f"{shop_id}|{months}|{rand4}|{cpu}"
     mac6 = _hmac_sha256_hex(SECRET_SALT, msg)[:6].upper()
     return f"{shop_id}-{months}M-{rand4}-{mac6}"
