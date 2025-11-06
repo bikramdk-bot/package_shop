@@ -6,8 +6,8 @@ Responsibilities:
 - Ensure token DB exists (token_db.sqlite)
 - Validate and apply tokens (non-reusable, shop-locked)
 
-Token format: <shop_id>-<months>M-<rand4>-<check4>
-- check4 = first 4 hex of SHA1(shop_id + rand4 + SECRET_SALT)
+Token format: <shop_id>-<months>M-<rand4>-<mac6>
+- mac6 = first 6 hex chars of HMAC-SHA256(SECRET_SALT, f"{shop_id}|{months}|{rand4}|{cpu_id}")
 
 All paths are resolved relative to this file's directory.
 """
@@ -17,15 +17,22 @@ import os
 import json
 import sqlite3
 import hashlib
-import random
+import hmac
+import secrets
 import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Shared secret salt
-SECRET_SALT = "SALT1234"
+# Shared secret salt (prefer environment variable in production)
+SECRET_SALT = os.environ.get("PACKAGE_SHOP_SECRET_SALT") or "SALT1234"
+if SECRET_SALT == "SALT1234":
+    # Informative message for developers (no secret management in repo)
+    print("[License] WARNING: using default SECRET_SALT; set PACKAGE_SHOP_SECRET_SALT in env for production")
+
+# Device CPU id binding (prefer environment variable); default embedded value
+DEVICE_CPU_ID = os.environ.get("PACKAGE_SHOP_CPU_ID") or "00000000f3b8f9de"
 
 # Base directory (src/)
 BASE_DIR = Path(__file__).resolve().parent
@@ -166,19 +173,23 @@ def _sha1_hex(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
 
 
-def parse_token(token: str) -> Tuple[str, int, str, str]:
-    """Return tuple (shop_id, months, rand4, check4) or raise ValueError."""
+def _hmac_sha256_hex(key: str, msg: str) -> str:
+    return hmac.new(key.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def parse_token(token: str, cpu_id: Optional[str] = None) -> Tuple[str, int, str, str]:
+    """Return tuple (shop_id, months, rand4, mac6) or raise ValueError.
+    Only supports the current short format: RAND4 (4 hex) and MAC6 (6 hex) using HMAC-SHA256.
+    If cpu_id is not provided, the configured DEVICE_CPU_ID (or env) is used.
+    """
     if not token or not isinstance(token, str):
         raise ValueError("Token is required")
     token = token.strip().upper()
     parts = token.split("-")
     if len(parts) != 4:
         raise ValueError("Invalid token format")
-    shop_id, months_part, rand4, check4 = parts
-    if not rand4 or len(rand4) != 4 or any(ch not in string.ascii_uppercase + string.digits for ch in rand4):
-        raise ValueError("Invalid random section")
-    if not check4 or len(check4) != 4 or any(ch not in string.hexdigits.upper() for ch in check4):
-        raise ValueError("Invalid checksum section")
+    shop_id, months_part, rand, mac = parts
+
     if not months_part.endswith("M"):
         raise ValueError("Invalid months section")
     try:
@@ -188,15 +199,24 @@ def parse_token(token: str) -> Tuple[str, int, str, str]:
     except Exception:
         raise ValueError("Invalid months value")
 
-    expected = _sha1_hex(shop_id + rand4 + SECRET_SALT)[:4].upper()
-    if expected != check4.upper():
-        raise ValueError("Checksum mismatch or wrong shop")
+    HEX_UPPER = "0123456789ABCDEF"
+    if not rand or len(rand) != 4 or any(ch not in HEX_UPPER for ch in rand):
+        raise ValueError("Invalid random section")
+    if not mac or len(mac) != 6 or any(ch not in HEX_UPPER for ch in mac):
+        raise ValueError("Invalid checksum section")
+
+    # determine cpu_id to use for verification
+    cpu = (cpu_id or DEVICE_CPU_ID).strip()
+    msg = f"{shop_id}|{months}|{rand}|{cpu}"
+    expected = _hmac_sha256_hex(SECRET_SALT, msg)[:6].upper()
+    if not hmac.compare_digest(expected, mac.upper()):
+        raise ValueError("Checksum mismatch or wrong shop/device")
 
     # Optional: sanity cap months to avoid accidents
     if months > 36:
         raise ValueError("Months too large")
 
-    return shop_id, months, rand4, check4.upper()
+    return shop_id, months, rand, mac.upper()
 
 
 def token_used(token: str) -> bool:
@@ -267,11 +287,17 @@ def apply_token(token: str) -> Tuple[bool, str, Optional[LicenseInfo]]:
 
 # ---------------- Token generation (utility) ----------------
 
-def generate_token(shop_id: str, months: int) -> str:
-    """Generate a token for shop_id and months. Random section is 4 chars [A-Z0-9]."""
+def generate_token(shop_id: str, months: int, cpu_id: Optional[str] = None) -> str:
+    """Generate a token for shop_id and months bound to a device cpu_id.
+
+    Token format: <SHOP>-<months>M-<RAND4>-<MAC6>
+    """
     shop_id = shop_id.strip().upper()
     if months <= 0:
         raise ValueError("months must be positive")
-    rand4 = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    check4 = _sha1_hex(shop_id + rand4 + SECRET_SALT)[:4].upper()
-    return f"{shop_id}-{months}M-{rand4}-{check4}"
+    # 4 hex chars of crypto random (shorter for UI entry)
+    rand4 = secrets.token_hex(2).upper()
+    cpu = (cpu_id or DEVICE_CPU_ID).strip()
+    msg = f"{shop_id}|{months}|{rand4}|{cpu}"
+    mac6 = _hmac_sha256_hex(SECRET_SALT, msg)[:6].upper()
+    return f"{shop_id}-{months}M-{rand4}-{mac6}"

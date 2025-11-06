@@ -112,14 +112,23 @@
       const lcn = document.getElementById('lcn').value.trim();
       const digits = document.getElementById('digits').value.trim();
 
-      const res = await fetch('/manual_label', {
+      // Client-side validation: LCN must be alphabetic characters only
+      const lcnPattern = /^[A-Za-z]+$/;
+      const msg = document.getElementById('status');
+      if (!lcnPattern.test(lcn)) {
+        msg.textContent = '❌ ' + (i18n?.[currentLang]?.invalidLCN || 'LCN must contain only letters (A-Z)');
+        msg.style.color = 'red';
+        setTimeout(() => msg.textContent = '', 3000);
+        return;
+      }
+
+      const res = await fetch('/print_label', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ lcn, digits })
       });
 
       const data = await res.json();
-      const msg = document.getElementById('status');
       if (data.status) {
         msg.textContent = (i18n?.[currentLang]?.labelSent)||'✅ Label sent successfully!';
         msg.style.color = 'green';
