@@ -153,10 +153,12 @@ def run_migrations():
     finally:
         conn.close()
 
-# Ensure license token DB and default license exist at startup (non-fatal if missing)
+# Ensure license token DB exists at startup (non-fatal if missing).
+# NOTE: removed automatic license normalization on startup so expired
+# licenses remain expired until explicitly extended by a token.
 try:
     ensure_token_db()
-    ensure_default_license()
+    # do NOT call ensure_default_license() here; require explicit activation
 except Exception as e:
     print(f"[startup] License initialization warning: {e}")
 
