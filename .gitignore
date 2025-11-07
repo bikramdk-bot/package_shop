@@ -16,7 +16,7 @@ dist/
 
 # SQLite / data
 db/*.db
-logs/
+*.sqlite
 *.log
 
 # VS Code

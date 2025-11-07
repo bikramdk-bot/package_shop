@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import json
+import base64
 import sqlite3
 import hashlib
 import hmac
@@ -71,6 +72,51 @@ def _write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+# ---------------- License file helpers (base64 on-disk, JSON in-memory) ----------------
+def _load_license_json(path: Path) -> Optional[dict]:
+    """Load license JSON from `path`.
+
+    On-disk format is expected to be base64-encoded JSON. For backward compatibility,
+    if the file contains plain JSON we will migrate it to base64 automatically.
+    Returns parsed dict or None on failure.
+    """
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+
+    # Try base64 decode first
+    try:
+        decoded = base64.b64decode(text.encode("utf-8")).decode("utf-8")
+        return json.loads(decoded)
+    except Exception:
+        # Not valid base64+json; try plain JSON and migrate
+        try:
+            data = json.loads(text)
+        except Exception:
+            return None
+        # Migrate to base64 format
+        try:
+            _write_license_base64(path, data)
+        except Exception:
+            # ignore migration failure but return parsed data
+            pass
+        return data
+
+
+def _write_license_base64(path: Path, data: dict) -> None:
+    """Write license JSON as base64-encoded content to disk atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    json_text = json.dumps(data, indent=2, ensure_ascii=False)
+    b64 = base64.b64encode(json_text.encode("utf-8")).decode("utf-8")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(b64)
+    tmp.replace(path)
+
+
 # ---------------- Shop info ----------------
 
 def ensure_shop_info(default_shop_id: str = "SHOP01") -> str:
@@ -93,7 +139,7 @@ def get_shop_id() -> str:
 def ensure_default_license(days: int = 30) -> LicenseInfo:
     """Ensure license.json exists with at least a default expiry of today + days."""
     today = date.today()
-    data = _load_json(LICENSE_PATH) or {}
+    data = _load_license_json(LICENSE_PATH) or {}
     existing = data.get("expiry")
     if existing:
         try:
@@ -107,16 +153,16 @@ def ensure_default_license(days: int = 30) -> LicenseInfo:
     min_expiry = today + timedelta(days=days)
     if expiry < min_expiry:
         expiry = min_expiry
-        _write_json(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
+        _write_license_base64(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
     else:
         # normalize format
-        _write_json(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
+        _write_license_base64(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
 
     return LicenseInfo(expiry=expiry)
 
 
 def read_license() -> LicenseInfo:
-    data = _load_json(LICENSE_PATH) or {}
+    data = _load_license_json(LICENSE_PATH) or {}
     exp_str = data.get("expiry")
     if not exp_str:
         return ensure_default_license()
@@ -128,7 +174,7 @@ def read_license() -> LicenseInfo:
 
 
 def write_license(info: LicenseInfo) -> None:
-    _write_json(LICENSE_PATH, {"expiry": info.expiry_str})
+    _write_license_base64(LICENSE_PATH, {"expiry": info.expiry_str})
 
 
 # ---------------- Token DB ----------------
