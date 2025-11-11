@@ -13,12 +13,11 @@ import re
 PRINTER_DEVICE = "/dev/usb/lp0"
 SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 
-# When set to a non-empty string, a scanned value equal to or starting with
-# this value will be treated as an LCN (special-case). Leave empty by
-# default to avoid accidental matches with numeric barcodes that happen to
-# contain a known substring.
-SPECIAL_LCN_MATCH = ""
-STRIP_LAST_5_FOR_SPECIAL = True
+# LCN detection: treat purely alphabetic tokens (legacy behavior).
+# Previously the code supported a SPECIAL_LCN_MATCH prefix and an
+# accompanying STRIP_LAST_5_FOR_SPECIAL behavior; these were redundant
+# in practice and caused surprising truncation of stored LCNs. The
+# logic has been simplified to avoid accidental prefix-based matches.
 
 current_lcn = None
 
@@ -55,10 +54,6 @@ def is_lcn(s: str) -> bool:
         return False
     s = s.strip()
     su = s.upper()
-    # Honor an explicit special match if configured
-    if SPECIAL_LCN_MATCH and (su == SPECIAL_LCN_MATCH or su.startswith(SPECIAL_LCN_MATCH)):
-        return True
-
     # Treat only purely alphabetic tokens as LCNs. This avoids classifying
     # mixed alphanumeric strings (e.g. "1231232131H") as LCNs — those are
     # barcodes and should be handled by the barcode path.
@@ -166,12 +161,8 @@ def main():
                             if buffer:
                                 # Use a more robust LCN detection instead of buffer.isalpha()
                                 if is_lcn(buffer):
-                                    lcn = buffer.upper()
-                                    if STRIP_LAST_5_FOR_SPECIAL and (
-                                        lcn == SPECIAL_LCN_MATCH or lcn.startswith(SPECIAL_LCN_MATCH)
-                                    ) and len(lcn) > 5:
-                                        lcn = lcn[:-5]
-                                    current_lcn = lcn
+                                    # Simplified: store the detected LCN as-is (uppercased).
+                                    current_lcn = buffer.strip().upper()
                                     print("Stored LCN:", current_lcn)
                                 else:
                                     if current_lcn:
