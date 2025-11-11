@@ -745,7 +745,20 @@ def collected_log():
         ORDER BY collected_at DESC
         LIMIT 200
     """)
-    rows = cursor.fetchall()
+    # Normalize provider labels for display
+    canon = {
+        'POSTNORD': 'PostNord',
+        'DAO': 'DAO',
+        'GLS': 'GLS',
+        'BRING': 'Bring',
+        'UPS': 'UPS'
+    }
+    rows = []
+    for r in cursor.fetchall():
+        d = dict(r)
+        prov = (d.get('provider') or '').strip()
+        d['provider'] = canon.get(prov.upper(), prov)
+        rows.append(d)
     conn.close()
 
     return render_template("collected_log.html", rows=rows)
@@ -1083,7 +1096,20 @@ def all_parcels():
         ORDER BY datetime(scan_time) DESC
         """
     )
-    rows = [dict(r) for r in cursor.fetchall()]
+    # Normalize provider labels for UI display (do not modify DB)
+    canon = {
+        'POSTNORD': 'PostNord',
+        'DAO': 'DAO',
+        'GLS': 'GLS',
+        'BRING': 'Bring',
+        'UPS': 'UPS'
+    }
+    rows = []
+    for r in cursor.fetchall():
+        d = dict(r)
+        prov = (d.get('provider') or '').strip()
+        d['provider'] = canon.get(prov.upper(), prov)
+        rows.append(d)
     conn.close()
     return jsonify(rows)
 

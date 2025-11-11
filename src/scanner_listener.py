@@ -48,18 +48,17 @@ def is_lcn(s: str) -> bool:
     """Return True if the scanned buffer should be treated as an LCN.
 
     Heuristics used:
-    - Matches SPECIAL_LCN_MATCH exactly or as a prefix
     - Or is purely alphabetic (legacy behavior)
     - Minimum length guard to avoid treating short tokens as LCNs
     """
     if not s:
         return False
     s = s.strip()
-    su = s.upper()
     # Treat only purely alphabetic tokens as LCNs. This avoids classifying
     # mixed alphanumeric strings (e.g. "1231232131H") as LCNs — those are
     # barcodes and should be handled by the barcode path.
-    if re.fullmatch(r"[A-Z]+", su) and len(su) >= 2:
+    # Preserve case: accept letters in any case and do not coerce here.
+    if re.fullmatch(r"[A-Za-z]+", s) and len(s) >= 2:
         return True
 
     return False
@@ -163,8 +162,8 @@ def main():
                             if buffer:
                                 # Use a more robust LCN detection instead of buffer.isalpha()
                                 if is_lcn(buffer):
-                                    # Simplified: store the detected LCN as-is (uppercased).
-                                    current_lcn = buffer.strip().upper()
+                                    # Store LCN exactly as scanned (preserve case)
+                                    current_lcn = buffer.strip()
                                     print("Stored LCN:", current_lcn)
                                 else:
                                     if current_lcn:
