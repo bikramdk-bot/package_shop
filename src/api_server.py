@@ -751,7 +751,8 @@ def collected_log():
         'DAO': 'DAO',
         'GLS': 'GLS',
         'BRING': 'Bring',
-        'UPS': 'UPS'
+        'UPS': 'UPS',
+        'DPD': 'DPD'
     }
     rows = []
     for r in cursor.fetchall():
@@ -856,7 +857,8 @@ def create_customer_entry():
         'DAO': 'DAO',
         'GLS': 'GLS',
         'BRING': 'Bring',
-        'UPS': 'UPS'
+        'UPS': 'UPS',
+        'DPD': 'DPD'
     }
     provider = canon.get(provider.upper(), provider)
 
@@ -952,7 +954,7 @@ def assign_collection():
     kode = (data.get("kode") or "").strip() or None
 
     canon = {
-        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS'
+        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS', 'DPD': 'DPD'
     }
     provider = canon.get(provider.upper(), provider)
     if not provider:
@@ -1102,7 +1104,8 @@ def all_parcels():
         'DAO': 'DAO',
         'GLS': 'GLS',
         'BRING': 'Bring',
-        'UPS': 'UPS'
+        'UPS': 'UPS',
+        'DPD': 'DPD'
     }
     rows = []
     for r in cursor.fetchall():
