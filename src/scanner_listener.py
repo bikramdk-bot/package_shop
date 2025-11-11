@@ -13,12 +13,11 @@ import re
 PRINTER_DEVICE = "/dev/usb/lp0"
 SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 
-# When set to a non-empty string, a scanned value equal to or starting with
-# this value will be treated as an LCN (special-case). Leave empty by
-# default to avoid accidental matches with numeric barcodes that happen to
-# contain a known substring.
-SPECIAL_LCN_MATCH = ""
-STRIP_LAST_5_FOR_SPECIAL = True
+# LCN detection: treat purely alphabetic tokens (legacy behavior).
+# Previously the code supported a SPECIAL_LCN_MATCH prefix and an
+# accompanying STRIP_LAST_5_FOR_SPECIAL behavior; these were redundant
+# in practice and caused surprising truncation of stored LCNs. The
+# logic has been simplified to avoid accidental prefix-based matches.
 
 current_lcn = None
 
@@ -36,7 +35,9 @@ def process_barcode(code: str) -> str:
     code = code.strip().upper()
     if len(code) >= 4 and code[-2:].isdigit():
         return code[-4:]
-    if len(code) >= 6 and code[-2:] in ("DE", "SE"):
+    # If the last two characters are alphabetic (e.g. country/provider code),
+    # treat the four characters before them as the digits to return.
+    if len(code) >= 6 and re.fullmatch(r"[A-Z]{2}", code[-2:]):
         return code[-6:-2]
     if len(code) >= 11 and code[-1].isalpha() and code[-2].isdigit():
         return code[-11:-7]
@@ -47,22 +48,17 @@ def is_lcn(s: str) -> bool:
     """Return True if the scanned buffer should be treated as an LCN.
 
     Heuristics used:
-    - Matches SPECIAL_LCN_MATCH exactly or as a prefix
     - Or is purely alphabetic (legacy behavior)
     - Minimum length guard to avoid treating short tokens as LCNs
     """
     if not s:
         return False
     s = s.strip()
-    su = s.upper()
-    # Honor an explicit special match if configured
-    if SPECIAL_LCN_MATCH and (su == SPECIAL_LCN_MATCH or su.startswith(SPECIAL_LCN_MATCH)):
-        return True
-
     # Treat only purely alphabetic tokens as LCNs. This avoids classifying
     # mixed alphanumeric strings (e.g. "1231232131H") as LCNs — those are
     # barcodes and should be handled by the barcode path.
-    if re.fullmatch(r"[A-Z]+", su) and len(su) >= 2:
+    # Preserve case: accept letters in any case and do not coerce here.
+    if re.fullmatch(r"[A-Za-z]+", s) and len(s) >= 2:
         return True
 
     return False
@@ -166,12 +162,8 @@ def main():
                             if buffer:
                                 # Use a more robust LCN detection instead of buffer.isalpha()
                                 if is_lcn(buffer):
-                                    lcn = buffer.upper()
-                                    if STRIP_LAST_5_FOR_SPECIAL and (
-                                        lcn == SPECIAL_LCN_MATCH or lcn.startswith(SPECIAL_LCN_MATCH)
-                                    ) and len(lcn) > 5:
-                                        lcn = lcn[:-5]
-                                    current_lcn = lcn
+                                    # Store LCN exactly as scanned (preserve case)
+                                    current_lcn = buffer.strip()
                                     print("Stored LCN:", current_lcn)
                                 else:
                                     if current_lcn:

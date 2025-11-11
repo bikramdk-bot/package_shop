@@ -49,6 +49,7 @@
       <option>GLS</option>
       <option>Bring</option>
       <option>UPS</option>
+      <option>DPD</option>
     </select>
     <label data-i18n="inputDigits">Digits</label>
     <input id="addDigits" type="text" placeholder="123456" style="width:120px;">
@@ -56,6 +57,11 @@
     <input id="addBarcode" type="text" placeholder="optional" style="width:180px;">
     <button onclick="addPacket()" data-i18n="btnAdd">Add</button>
     <span id="addStatus" style="margin-left:8px;color:#555;"></span>
+  </div>
+  <div id="printControl" style="margin:10px 0; display:flex; gap:8px; align-items:center;">
+    <label data-i18n="printMode">Print labels</label>
+    <button id="printToggle" onclick="togglePrintMode()" style="padding:6px 10px; border-radius:6px;">Loading...</button>
+    <span id="printModeMsg" style="color:#555;"></span>
   </div>
   <div style="margin:10px 0; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <label data-i18n="filterProvider">Provider</label>
@@ -66,6 +72,7 @@
       <option>GLS</option>
       <option>Bring</option>
       <option>UPS</option>
+      <option>DPD</option>
     </select>
     <label data-i18n="filterStatus">Status</label>
     <select id="filterStatus">
@@ -233,8 +240,50 @@
     document.getElementById('filterProvider').addEventListener('change', render);
     document.getElementById('filterStatus').addEventListener('change', render);
     document.getElementById('sortBy').addEventListener('change', render);
+    // Initialize print mode control
+    await refreshPrintMode();
     loadParcels();
   })();
+
+  async function refreshPrintMode(){
+    const btn = document.getElementById('printToggle');
+    const msg = document.getElementById('printModeMsg');
+    try{
+      const res = await fetch('/print_mode');
+      if(!res.ok) throw new Error('status ' + res.status);
+      const j = await res.json();
+      const on = !!j.print;
+      btn.textContent = on ? (i18n?.[currentLang]?.printOn || 'ON') : (i18n?.[currentLang]?.printOff || 'OFF');
+      btn.style.background = on ? '#10b981' : '#ef4444';
+      msg.textContent = on ? (i18n?.[currentLang]?.printModeEnabled || 'Printing enabled') : (i18n?.[currentLang]?.printModeDisabled || 'Printing disabled');
+    }catch(e){
+      btn.textContent = 'Err';
+      msg.textContent = '';
+      console.warn('refreshPrintMode failed', e);
+    }
+  }
+
+  async function togglePrintMode(){
+    const btn = document.getElementById('printToggle');
+    const msg = document.getElementById('printModeMsg');
+    try{
+      const cur = await fetch('/print_mode');
+      const j = await cur.json();
+      const next = !j.print;
+      const res = await fetch('/print_mode', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({print: next}) });
+      if(!res.ok) {
+        const err = await res.json().catch(()=>({error:'failed'}));
+        msg.textContent = err.error || (i18n?.[currentLang]?.printToggleFail || 'Failed');
+        msg.style.color = 'red';
+        return;
+      }
+      await refreshPrintMode();
+      msg.textContent = i18n?.[currentLang]?.printToggleSuccess || 'Updated';
+      msg.style.color = 'green';
+    }catch(e){
+      console.warn('togglePrintMode failed', e);
+    }
+  }
   </script>
 </body>
 </html>

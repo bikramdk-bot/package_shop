@@ -83,6 +83,13 @@
     "licenseExpiredMsg": "Aktivér din licens for at fortsætte med at bruge dashboardet.",
     "activateLicense": "Aktivér licens",
     "assignCustomerNumber": "Kundenummer"
+    ,"printMode": "Udskriv labels",
+    "printOn": "ON",
+    "printOff": "OFF",
+    "printModeEnabled": "Udskrivning aktiveret",
+    "printModeDisabled": "Udskrivning deaktiveret",
+    "printToggleSuccess": "Indstilling opdateret",
+    "printToggleFail": "Kunne ikke opdatere indstilling"
   },
   "en": {
     "title": "Customer Check-in",
@@ -168,6 +175,13 @@
     "licenseExpiredMsg": "Please activate your license to continue using the dashboard.",
     "activateLicense": "Activate License",
     "assignCustomerNumber": "Customer Number"
+    ,"printMode": "Print labels",
+    "printOn": "ON",
+    "printOff": "OFF",
+    "printModeEnabled": "Printing enabled",
+    "printModeDisabled": "Printing disabled",
+    "printToggleSuccess": "Setting updated",
+    "printToggleFail": "Failed to update setting"
   },
   "de": {
     "title": "Kunden-Check-in",
@@ -253,6 +267,13 @@
     "licenseExpiredMsg": "Bitte aktivieren Sie Ihre Lizenz, um das Dashboard weiter zu nutzen.",
     "activateLicense": "Lizenz aktivieren",
     "assignCustomerNumber": "Kundennummer"
+    ,"printMode": "Etiketten drucken",
+    "printOn": "AN",
+    "printOff": "AUS",
+    "printModeEnabled": "Drucken aktiviert",
+    "printModeDisabled": "Drucken deaktiviert",
+    "printToggleSuccess": "Einstellung aktualisiert",
+    "printToggleFail": "Einstellung konnte nicht aktualisiert werden"
   },
   "sv": {
     "title": "Kundincheckning",
@@ -338,5 +359,12 @@
     "licenseExpiredMsg": "Aktivera din licens för att fortsätta använda instrumentpanelen.",
     "activateLicense": "Aktivera licens",
     "assignCustomerNumber": "Kundnummer"
+    ,"printMode": "Skriv ut etiketter",
+    "printOn": "PÅ",
+    "printOff": "AV",
+    "printModeEnabled": "Utskrift aktiverad",
+    "printModeDisabled": "Utskrift inaktiverad",
+    "printToggleSuccess": "Inställning uppdaterad",
+    "printToggleFail": "Kunde inte uppdatera inställning"
   }
 }

@@ -19,6 +19,8 @@
       --dao: #e11d48;
       --gls: #9ca3af;
       --bring: #22c55e;
+      --dpd: #f59e0b;
+      --ups: #111827;
     }
 
     * { box-sizing: border-box; }
@@ -84,6 +86,9 @@
     .p-dao { background: rgba(225,29,72,0.08); }
     .p-gls { background: rgba(156,163,175,0.15); }
     .p-bring { background: rgba(34,197,94,0.12); }
+  .p-ups { background: rgba(17,24,39,0.06); }
+  /* DPD: warm yellow -> red gradient, subtle and readable */
+  .p-dpd { background: linear-gradient(90deg, rgba(245,154,11,0.12), rgba(239,68,68,0.10)); }
 
     /* Digit boxes */
     .input-area { display: grid; gap: 14px; padding: 8px 0 0; }
@@ -241,9 +246,10 @@
       { key:'DAO',      color:'var(--dao)',      css:'p-dao',      img:'/static/logos/dao.png',      fallback:'DAO' },
       { key:'GLS',      color:'var(--gls)',      css:'p-gls',      img:'/static/logos/gls.png',      fallback:'GLS' },
       { key:'Bring',    color:'var(--bring)',    css:'p-bring',    img:'/static/logos/bring.png',    fallback:'Bring' },
-      { key:'UPS',      color:'#111827',         css:'p-ups',      img:'/static/logos/ups.png',      fallback:'UPS' },
+      { key:'UPS',      color:'var(--ups)',      css:'p-ups',      img:'/static/logos/ups.png',      fallback:'UPS' },
+      { key:'DPD',      color:'var(--dpd)',      css:'p-dpd',      img:'/static/logos/dpd.png',      fallback:'DPD' },
     ];
-    const providerVisible = { PostNord:true, DAO:true, GLS:true, Bring:true, UPS:true };// configurable per shop
+    const providerVisible = { PostNord:true, DAO:true, GLS:true, Bring:true, UPS:true, DPD:true };// configurable per shop
 
     let selectedProvider = null;
     let inputDigits = '';
@@ -289,12 +295,11 @@
       document.getElementById('message').textContent = '';
   if (selectedProvider === 'DAO') targetLen = 4; // start with last 4 (DAO uses kode modal later)
   else if (selectedProvider === 'Bring') targetLen = 5; // Bring asks 5-digit afhentningskode directly
-  else if (selectedProvider === 'UPS') targetLen = 5; // UPS asks 5-digit collection code directly
-  else targetLen = 4; // PostNord/GLS start with 4
+  else targetLen = 4; // PostNord/GLS/UPS/DPD start with 4
       renderInputBoxes(targetLen, p.color);
       focusActiveBox();
       // Set a clearer prompt for UPS/Bring 5-digit code entry
-      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+      if (selectedProvider === 'Bring') {
         document.getElementById('prompt').textContent = 'Indtast 5-cifret afhentningskode';
       } else {
         document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptDigits) || 'Indtast cifre';
@@ -366,14 +371,14 @@
       if (!selectedProvider) { msg.textContent = (i18n?.[currentLang]?.chooseProvider)||'Vælg udbyder først'; return; }
       if (inputDigits.length < targetLen) { msg.textContent = (i18n?.[currentLang]?.completeDigits)||'Udfyld alle felter'; return; }
 
-      // UPS and Bring go straight to live with 5-digit kode
-      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+      // Bring goes straight to live with 5-digit kode; UPS now follows the GLS flow
+      if (selectedProvider === 'Bring') {
         if (inputDigits.length !== 5) { const m=document.getElementById('message'); m.className='msg error'; m.textContent=(i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
         await submitCustomerEntry(inputDigits);
         return;
       }
 
-      // For PostNord/GLS/DAO: use /lookup to match by digits and escalate length when needed
+      // For PostNord/GLS/DAO (and UPS/DPD): use /lookup to match by digits and escalate length when needed
       const res = await fetch('/lookup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: selectedProvider, digits: inputDigits })
@@ -382,7 +387,7 @@
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
 
-      if (selectedProvider === 'PostNord' || selectedProvider === 'GLS' || selectedProvider === 'DAO') {
+      if (['PostNord','GLS','DAO','UPS','DPD'].includes(selectedProvider)) {
         if (results.length > 1) {
           if (targetLen === 4) { targetLen = 6; inputDigits = ''; renderInputBoxes(targetLen); msg.textContent = (i18n?.[currentLang]?.needMoreDigits)||'Indtast flere cifre (6)'; return; }
           if (targetLen === 6) { targetLen = 8; inputDigits = ''; renderInputBoxes(targetLen); msg.textContent = (i18n?.[currentLang]?.needMoreDigits8)||'Indtast flere cifre (8)'; return; }

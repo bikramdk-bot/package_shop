@@ -146,10 +146,44 @@ def run_migrations():
             """
         )
         cur.execute("INSERT OR IGNORE INTO kiosk_counter (id, last_number) VALUES (1, 0)")
+        # Settings table for global flags (e.g., print_enabled)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+        # Ensure default print_enabled = 1 (true)
+        cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('print_enabled', '1')")
         conn.commit()
     except sqlite3.OperationalError:
         # If locked during startup, ignore; next startup/run can add these.
         pass
+    finally:
+        conn.close()
+
+
+def get_setting(key: str, default: str = None):
+    conn = open_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        return default
+    finally:
+        conn.close()
+
+
+def set_setting(key: str, value: str):
+    conn = open_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+        conn.commit()
     finally:
         conn.close()
 
@@ -745,7 +779,21 @@ def collected_log():
         ORDER BY collected_at DESC
         LIMIT 200
     """)
-    rows = cursor.fetchall()
+    # Normalize provider labels for display
+    canon = {
+        'POSTNORD': 'PostNord',
+        'DAO': 'DAO',
+        'GLS': 'GLS',
+        'BRING': 'Bring',
+        'UPS': 'UPS',
+        'DPD': 'DPD'
+    }
+    rows = []
+    for r in cursor.fetchall():
+        d = dict(r)
+        prov = (d.get('provider') or '').strip()
+        d['provider'] = canon.get(prov.upper(), prov)
+        rows.append(d)
     conn.close()
 
     return render_template("collected_log.html", rows=rows)
@@ -820,14 +868,55 @@ def scan_and_print():
     except Exception as e:
         return jsonify({"error": "DB insert failed", "details": str(e)}), 500
 
-    # Print label
-    try:
-        zpl = _build_zpl(lcn, digits)
-        _write_zpl_to_device(zpl, printer)
-    except Exception as e:
-        return jsonify({"error": "Printed failed", "details": str(e), "db": db_result}), 500
+    # Determine printing behavior: request may include explicit 'print' boolean.
+    # If absent, fall back to server-side setting 'print_enabled'.
+    req_print = data.get('print', None)
+    if req_print is None:
+        val = get_setting('print_enabled', '1')
+        try:
+            do_print = bool(int(val))
+        except Exception:
+            do_print = True
+    else:
+        do_print = bool(req_print)
 
-    return jsonify({"status": "ok", "db": db_result, "printed": {"lcn": lcn, "digits": digits, "printer": printer}})
+    # Print label if enabled
+    printed_info = None
+    if do_print:
+        try:
+            zpl = _build_zpl(lcn, digits)
+            _write_zpl_to_device(zpl, printer)
+            printed_info = {"lcn": lcn, "digits": digits, "printer": printer}
+        except Exception as e:
+            return jsonify({"error": "Printed failed", "details": str(e), "db": db_result}), 500
+
+    return jsonify({"status": "ok", "db": db_result, "printed": printed_info})
+
+
+@app.route("/print_mode", methods=["GET"])
+def get_print_mode():
+    """Return current server-side print mode as JSON: { print: true|false }"""
+    val = get_setting('print_enabled', '1')
+    try:
+        enabled = bool(int(val))
+    except Exception:
+        enabled = True
+    return jsonify({"print": enabled})
+
+
+@app.route("/print_mode", methods=["POST"])
+def set_print_mode():
+    """Set server-side print mode. Expects JSON { print: true|false }"""
+    data = request.get_json(force=True) or {}
+    p = data.get('print')
+    if p is None:
+        return jsonify({"error": "Missing 'print' boolean in request body"}), 400
+    try:
+        val = '1' if bool(p) else '0'
+        set_setting('print_enabled', val)
+    except Exception as e:
+        return jsonify({"error": "Failed to set print mode", "details": str(e)}), 500
+    return jsonify({"print": bool(p)})
 
 # ---------------------- KIOSK: CREATE ENTRY + ASSIGN COLLECTION ----------------------
 @app.route("/customer_entry", methods=["POST"])
@@ -843,7 +932,8 @@ def create_customer_entry():
         'DAO': 'DAO',
         'GLS': 'GLS',
         'BRING': 'Bring',
-        'UPS': 'UPS'
+        'UPS': 'UPS',
+        'DPD': 'DPD'
     }
     provider = canon.get(provider.upper(), provider)
 
@@ -939,7 +1029,7 @@ def assign_collection():
     kode = (data.get("kode") or "").strip() or None
 
     canon = {
-        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS'
+        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS', 'DPD': 'DPD'
     }
     provider = canon.get(provider.upper(), provider)
     if not provider:
@@ -1083,7 +1173,21 @@ def all_parcels():
         ORDER BY datetime(scan_time) DESC
         """
     )
-    rows = [dict(r) for r in cursor.fetchall()]
+    # Normalize provider labels for UI display (do not modify DB)
+    canon = {
+        'POSTNORD': 'PostNord',
+        'DAO': 'DAO',
+        'GLS': 'GLS',
+        'BRING': 'Bring',
+        'UPS': 'UPS',
+        'DPD': 'DPD'
+    }
+    rows = []
+    for r in cursor.fetchall():
+        d = dict(r)
+        prov = (d.get('provider') or '').strip()
+        d['provider'] = canon.get(prov.upper(), prov)
+        rows.append(d)
     conn.close()
     return jsonify(rows)
 
