@@ -8,6 +8,7 @@ from license_manager import (
 )
 import sqlite3, os
 from datetime import datetime, timedelta, date
+import threading, time
 
 app = Flask(__name__)
 
@@ -163,6 +164,55 @@ def run_migrations():
         pass
     finally:
         conn.close()
+
+    # Start background cleanup scheduler to remove old packets daily.
+    try:
+        start_cleanup_scheduler()
+    except Exception:
+        # non-fatal: if thread can't start, app still runs
+        pass
+
+
+def cleanup_old_packets():
+    """Delete packets whose scan_time is older than 8 days.
+
+    Uses SQLite builtin datetime('now','-8 days') so no timezone arithmetic in Python.
+    Returns number of deleted rows.
+    """
+    conn = open_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+        row = cur.fetchone()
+        to_delete = int(row[0] or 0)
+        if to_delete > 0:
+            cur.execute("DELETE FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+            conn.commit()
+        return to_delete
+    finally:
+        conn.close()
+
+
+def start_cleanup_scheduler(interval_hours: int = 24):
+    """Start a daemon thread that runs cleanup_old_packets() once every `interval_hours` hours.
+
+    The thread is best-effort (exceptions logged to stdout) and runs as a daemon so it
+    doesn't block process exit.
+    """
+    def loop():
+        while True:
+            try:
+                n = cleanup_old_packets()
+                if n:
+                    print(f"[cleanup] removed {n} packets older than 8 days")
+            except Exception as e:
+                print(f"[cleanup] error: {e}")
+            # Sleep between runs; small sleep to allow quicker shutdown responsiveness
+            for _ in range(max(1, int(interval_hours * 3600 / 5))):
+                time.sleep(5)
+
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
 
 
 def get_setting(key: str, default: str = None):
