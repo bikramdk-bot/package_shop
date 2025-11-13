@@ -793,6 +793,8 @@ def collected_log():
         d = dict(r)
         prov = (d.get('provider') or '').strip()
         d['provider'] = canon.get(prov.upper(), prov)
+        # expose entry_date as an alias for scan_time so UI can use a stable name
+        d['entry_date'] = d.get('scan_time')
         rows.append(d)
     conn.close()
 
@@ -1206,7 +1208,7 @@ def update_status_api():
         """
         UPDATE packets
         SET status = ?, scan_time = ?
-        WHERE provider = ? AND digits = ?
+        WHERE UPPER(provider) = UPPER(?) AND digits = ?
         """,
         (new_status, datetime.now(), provider, digits),
     )
@@ -1227,7 +1229,7 @@ def delete_parcel_api():
     cursor.execute(
         """
         DELETE FROM packets
-        WHERE provider = ? AND digits = ?
+        WHERE UPPER(provider) = UPPER(?) AND digits = ?
         """,
         (provider, digits),
     )
