@@ -355,10 +355,10 @@ def lookup_parcel():
                 WHERE c2.collection_id IS NOT NULL
                   AND c2.kode IS NOT NULL
                   AND c2.provider = c.provider
-                  AND (
-                        (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
-                     OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
-                  )
+                    AND (
+                                    (c2.provider IN ('BRING') AND c2.kode = c.kode)
+                                OR (c2.provider NOT IN ('BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                            )
                 ORDER BY c2.created_at ASC
                 LIMIT 1
             )
@@ -369,32 +369,32 @@ def lookup_parcel():
                 WHERE c2.collection_id IS NOT NULL
                   AND c2.kode IS NOT NULL
                   AND c2.provider = c.provider
-                  AND (
-                        (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
-                     OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
-                  )
+                        AND (
+                                (c2.provider IN ('BRING') AND c2.kode = c.kode)
+                            OR (c2.provider NOT IN ('BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                        )
               )
             """
         )
         cursor.execute(
             """
-            UPDATE customer_entries AS c
-            SET collection_id = (
-                SELECT c2.collection_id FROM customer_entries AS c2
-                WHERE c2.collection_id IS NOT NULL
-                  AND c2.provider IN ('UPS','BRING')
-                  AND c2.kode = c.kode
-                ORDER BY c2.created_at ASC
-                LIMIT 1
-            )
-            WHERE c.collection_id IS NULL
-              AND c.provider IN ('UPS','BRING')
-              AND EXISTS (
-                SELECT 1 FROM customer_entries AS c2
-                WHERE c2.collection_id IS NOT NULL
-                  AND c2.provider IN ('UPS','BRING')
-                  AND c2.kode = c.kode
-              )
+                        UPDATE customer_entries AS c
+                        SET collection_id = (
+                                SELECT c2.collection_id FROM customer_entries AS c2
+                                WHERE c2.collection_id IS NOT NULL
+                                    AND c2.provider IN ('BRING')
+                                    AND c2.kode = c.kode
+                                ORDER BY c2.created_at ASC
+                                LIMIT 1
+                        )
+                        WHERE c.collection_id IS NULL
+                            AND c.provider IN ('BRING')
+                            AND EXISTS (
+                                SELECT 1 FROM customer_entries AS c2
+                                WHERE c2.collection_id IS NOT NULL
+                                    AND c2.provider IN ('BRING')
+                                    AND c2.kode = c.kode
+                            )
             """
         )
     except sqlite3.OperationalError:
@@ -453,7 +453,8 @@ def lookup_parcel():
     return jsonify(entries)
     for g in groups:
         provider, digits, kode = g
-        if provider in ('UPS','BRING'):
+        # Treat only BRING as kode-based grouping; UPS should behave like GLS
+        if provider and provider.upper() == 'BRING':
             cursor.execute(
                 """
                 UPDATE customer_entries
@@ -553,10 +554,10 @@ def get_customer_entries():
                                 WHERE c2.collection_id IS NOT NULL
                                     AND c2.kode IS NOT NULL
                                     AND c2.provider = c.provider
-                                    AND (
-                                                (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
-                                         OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
-                                    )
+                              AND (
+                                           (c2.provider IN ('BRING') AND c2.kode = c.kode)
+                                     OR (c2.provider NOT IN ('BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                                 )
                                 ORDER BY c2.created_at ASC
                                 LIMIT 1
                         )
@@ -567,32 +568,32 @@ def get_customer_entries():
                                 WHERE c2.collection_id IS NOT NULL
                                     AND c2.kode IS NOT NULL
                                     AND c2.provider = c.provider
-                                    AND (
-                                                (c2.provider IN ('UPS','BRING') AND c2.kode = c.kode)
-                                         OR (c2.provider NOT IN ('UPS','BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
-                                    )
+                             AND (
+                                       (c2.provider IN ('BRING') AND c2.kode = c.kode)
+                                 OR (c2.provider NOT IN ('BRING') AND c2.digits = c.digits AND c2.kode = c.kode)
+                             )
                             )
             """
         )
 
-                # UPS/Bring case: their 5-digit code is stored in kode; propagate by provider+kode
+                                # Bring case: their 5-digit code is stored in kode; propagate by provider+kode
         cursor.execute(
             """
             UPDATE customer_entries AS c
             SET collection_id = (
                 SELECT c2.collection_id FROM customer_entries AS c2
                 WHERE c2.collection_id IS NOT NULL
-                                    AND c2.provider IN ('UPS','BRING')
+                                                                        AND c2.provider IN ('BRING')
                                     AND c2.kode = c.kode
                 ORDER BY c2.created_at ASC
                 LIMIT 1
             )
             WHERE c.collection_id IS NULL
-                            AND c.provider IN ('UPS','BRING')
+                                                        AND c.provider IN ('BRING')
               AND EXISTS (
                 SELECT 1 FROM customer_entries AS c2
                 WHERE c2.collection_id IS NOT NULL
-                                    AND c2.provider IN ('UPS','BRING')
+                                                                        AND c2.provider IN ('BRING')
                                     AND c2.kode = c.kode
               )
             """
@@ -640,13 +641,26 @@ def get_customer_entries():
     # 5️⃣ Add match flag
     for e in entries:
         c2 = conn.cursor()
-        c2.execute(
-                        """
-                        SELECT COUNT(*) FROM packets
-                        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                            AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
-                        """,
-                        (e["provider"], e["digits"], e["digits"], e["digits"]))
+        prov_upper = (e.get("provider") or "").upper()
+        # BRING entries are matched by their 5-digit kode (often stored in digits or barcode)
+        if prov_upper == 'BRING' and e.get("kode"):
+            kode = e.get("kode")
+            c2.execute(
+                """
+                SELECT COUNT(*) FROM packets
+                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+                  AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits OR barcode = ? OR barcode LIKE '%' || ?)
+                """,
+                (e["provider"], kode, kode, kode, kode, kode),
+            )
+        else:
+            c2.execute(
+                """
+                SELECT COUNT(*) FROM packets
+                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+                    AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
+                """,
+                (e["provider"], e["digits"], e["digits"], e["digits"]))
         e["matched"] = c2.fetchone()[0] > 0
 
     # 6️⃣ Convert created_at to ISO format for browser (so countdown works)
@@ -992,9 +1006,10 @@ def create_customer_entry():
     if not provider:
         return jsonify({"error": "Missing provider"}), 400
     # Provider-specific kode rules
-    if provider in ("UPS", "Bring", "BRING"):
+    # Bring requires a 5-digit kode; UPS should behave like GLS (no kode requirement)
+    if provider == "Bring":
         if not kode or not kode.isdigit() or len(kode) != 5:
-            return jsonify({"error": "UPS/Bring require 5-digit kode"}), 400
+            return jsonify({"error": "Bring requires 5-digit kode"}), 400
     if provider == "DAO":
         if not kode or not kode.isdigit() or len(kode) != 5:
             return jsonify({"error": "DAO requires 5-digit kode"}), 400
@@ -1046,12 +1061,12 @@ def assign_collection():
         )
         rows = cur.fetchall()
         updated = 0
-        # Group by provider+kode for UPS/Bring, else provider+digits(+kode)
+        # Group by provider+kode for Bring only, else provider+digits(+kode)
         for r in rows:
             prov = r["provider"]
             digs = r["digits"]
             kode = r["kode"]
-            if prov in ("UPS", "Bring") and kode:
+            if prov and prov.upper() == "BRING" and kode:
                 cur.execute(
                     """
                     UPDATE customer_entries
@@ -1091,7 +1106,8 @@ def assign_collection():
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     # Try to find existing collection_id for this group
-    if provider in ("UPS", "Bring"):
+    # For Bring look up by kode; UPS should be treated like GLS (digits-based)
+    if provider and provider.upper() == "BRING":
         cur.execute(
             """
             SELECT collection_id FROM customer_entries
@@ -1116,7 +1132,7 @@ def assign_collection():
         base = cur.fetchone()[0]
         collection_id = f"C{base}"
 
-    if provider in ("UPS", "Bring"):
+    if provider and provider.upper() == "BRING":
         cur.execute(
             """
             UPDATE customer_entries
