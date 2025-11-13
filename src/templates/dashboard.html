@@ -97,6 +97,7 @@
   <th data-i18n="colProvider">Provider</th>
   <th data-i18n="colDigits">Digits</th>
   <th data-i18n="colBarcode">Barcode</th>
+  <th data-i18n="colEntryDate">Entry date</th>
   <th data-i18n="colStatus">Status</th>
   <th data-i18n="colActions">Actions</th>
       </tr>
@@ -106,6 +107,17 @@
 
   <script>
   let cache = [];
+  // Format a timestamp into `DD-mon` (e.g. 12-apr). Returns empty string for falsy input.
+  function formatEntryDate(ts) {
+    if (!ts) return '';
+    // Accept either a Date object or a parsable date string
+    const d = (ts instanceof Date) ? ts : new Date(ts);
+    if (isNaN(d)) return String(ts);
+    const day = String(d.getDate()).padStart(2, '0');
+    const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const mon = months[d.getMonth()] || '';
+    return `${day}-${mon}`;
+  }
   async function checkLicense() {
     try {
       const res = await fetch('/license_status');
@@ -175,11 +187,13 @@
 
     data.forEach(row => {
       const tr = document.createElement('tr');
+      const entryDateStr = formatEntryDate(row.entry_date || row.scan_time || '');
       tr.innerHTML = `
         <td>${row.id}</td>
         <td>${row.provider}</td>
         <td>${row.digits}</td>
         <td>${row.barcode || ''}</td>
+        <td>${entryDateStr}</td>
         <td>${row.status}</td>
         <td>
           <button data-i18n="btnCollected" onclick="updateStatus('${row.provider}', '${row.digits}', 'collected')">✅ Collected</button>
