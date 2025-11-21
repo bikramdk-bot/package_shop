@@ -122,19 +122,13 @@ async function loadEntries() {
     `;
 
     tbody.appendChild(tr);
-    // After inserting row, restore paused state from localStorage if present
+    // Reflect server-side hold state for this entry (packet-specific)
     try {
-      const pausedMap = JSON.parse(localStorage.getItem('livePausedEntries') || '{}');
-      const pid = String(row.id);
       const cell = tbody.querySelector(`.countdown[data-entry-id="${row.id}"]`);
       if (cell) {
-        if (pausedMap[pid]) {
-          // use stored remaining value and mark paused
-          cell.dataset.paused = '1';
-          cell.dataset.remaining = String(pausedMap[pid]);
-          const timeSpan = cell.querySelector('.time-text');
-          if (timeSpan) { timeSpan.textContent = `${pausedMap[pid]}s`; timeSpan.style.color = (pausedMap[pid] <= 15 ? 'red' : pausedMap[pid] <= 60 ? 'orange' : 'green'); }
-          // toggle icon to green play
+        // server provides `held` flag per row; when held, show play icon (green)
+        if (row.held) {
+          cell.dataset.held = '1';
           const icon = document.getElementById(`icon-${row.id}`);
           if (icon) {
             icon.innerHTML = '<path d="M5 3v18l15-9z"/>'; // play triangle
@@ -142,10 +136,10 @@ async function loadEntries() {
             icon.setAttribute('fill', 'green');
           }
         } else {
-          cell.dataset.paused = '0';
+          cell.dataset.held = '0';
         }
       }
-    } catch (e) { /* ignore localStorage parse errors */ }
+    } catch (e) { /* ignore DOM errors */ }
   }
 }
 
@@ -201,35 +195,21 @@ function deliveredEntry(id) { resolve(id, 'collected'); }
 function notDeliveredEntry(id) { resolve(id, 'keep'); }
 
 // --- Pause / resume per-row (client-side, persisted in localStorage) ---
+// Toggle pause by calling server-side hold/unhold so pause is packet-specific
 function togglePause(entryId) {
-  try {
-    const key = String(entryId);
-    const map = JSON.parse(localStorage.getItem('livePausedEntries') || '{}');
-    const cell = document.querySelector(`.countdown[data-entry-id="${entryId}"]`);
-    if (!cell) return;
-    const paused = cell.dataset.paused === '1';
-    const timeSpan = cell.querySelector('.time-text');
-    const icon = document.getElementById(`icon-${entryId}`);
-    let remaining = parseInt(cell.dataset.remaining || '0', 10);
-    if (!paused) {
-      // Pause: store remaining and switch icon to play (green)
-      map[key] = remaining;
-      localStorage.setItem('livePausedEntries', JSON.stringify(map));
-      cell.dataset.paused = '1';
-      if (icon) { icon.innerHTML = '<path d="M5 3v18l15-9z"/>'; icon.setAttribute('stroke','green'); icon.setAttribute('fill','green'); }
-    } else {
-      // Resume: remove stored entry and switch icon back to pause (red)
-      delete map[key];
-      localStorage.setItem('livePausedEntries', JSON.stringify(map));
-      cell.dataset.paused = '0';
-      if (icon) {
-        icon.innerHTML = '<rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect>';
-        icon.setAttribute('stroke','red'); icon.removeAttribute('fill');
-      }
-    }
-  } catch (e) {
-    console.warn('togglePause error', e);
-  }
+  const cell = document.querySelector(`.countdown[data-entry-id="${entryId}"]`);
+  if (!cell) return;
+  const held = cell.dataset.held === '1';
+  // If currently held on the server, call unhold; otherwise call hold
+  const url = held ? '/unhold_entry' : '/hold_entry';
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ entry_id: entryId })
+  }).then(res => {
+    // refresh entries so UI + remaining sync with server state
+    loadEntries();
+  }).catch(err => console.warn('hold toggle failed', err));
 }
 
 // refresh table every 2s, update timers every 1s

@@ -850,7 +850,7 @@ def collected_log():
         'GLS': 'GLS',
         'BRING': 'Bring',
         'UPS': 'UPS',
-        'DPD': 'DPD'
+        'DHL': 'DHL'
     }
     rows = []
     for r in cursor.fetchall():
@@ -999,7 +999,7 @@ def create_customer_entry():
         'GLS': 'GLS',
         'BRING': 'Bring',
         'UPS': 'UPS',
-        'DPD': 'DPD'
+        'DHL': 'DHL'
     }
     provider = canon.get(provider.upper(), provider)
 
@@ -1096,7 +1096,7 @@ def assign_collection():
     kode = (data.get("kode") or "").strip() or None
 
     canon = {
-        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS', 'DPD': 'DPD'
+        'POSTNORD': 'PostNord', 'DAO': 'DAO', 'GLS': 'GLS', 'BRING': 'Bring', 'UPS': 'UPS', 'DHL': 'DHL'
     }
     provider = canon.get(provider.upper(), provider)
     if not provider:
@@ -1248,7 +1248,7 @@ def all_parcels():
         'GLS': 'GLS',
         'BRING': 'Bring',
         'UPS': 'UPS',
-        'DPD': 'DPD'
+        'DHL': 'DHL'
     }
     rows = []
     for r in cursor.fetchall():
@@ -1336,7 +1336,8 @@ def insert_packet():
         'DAO': 'DAO',
         'GLS': 'GLS',
         'BRING': 'Bring',
-        'UPS': 'UPS'
+        'UPS': 'UPS',
+        'DHL': 'DHL'
     }
     provider = canon.get(provider.upper(), provider)
     result = insert_parcel(provider, digits, barcode)
