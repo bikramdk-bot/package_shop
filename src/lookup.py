@@ -38,10 +38,22 @@ def init_db():
 
 
 # ---------------------- INSERT ----------------------
-def _variant_slice(s: str, n: int) -> str | None:
-    if not s:
+def _variant_from_barcode(code, n):
+    """Apply same rules as 4-digit extraction for N=6,8,10 on barcode.
+    - End with two digits: last N
+    - End with two letters: N before those two
+    - End with digit+letter and len>=N+7: s[-(N+7):-7]
+    - Else: last N (if available)
+    """
+    if not code:
         return None
-    s = s.strip()
+    s = str(code).strip().upper()
+    if len(s) >= n and s[-2:].isdigit():
+        return s[-n:]
+    if len(s) >= n + 2 and s[-2:].isalpha():
+        return s[-(n + 2):-2]
+    if len(s) >= n + 7 and s[-1].isalpha() and s[-2].isdigit():
+        return s[-(n + 7):-7]
     return s[-n:] if len(s) >= n else None
 
 def insert_parcel(provider, digits, barcode=None):
@@ -61,9 +73,9 @@ def insert_parcel(provider, digits, barcode=None):
         conn.close()
         return {"warning": "Packet already exists and is in_shop."}
 
-    digit6 = _variant_slice(barcode, 6)
-    digit8 = _variant_slice(barcode, 8)
-    digit10 = _variant_slice(barcode, 10)
+    digit6 = _variant_from_barcode(barcode, 6)
+    digit8 = _variant_from_barcode(barcode, 8)
+    digit10 = _variant_from_barcode(barcode, 10)
     cursor.execute("""
         INSERT INTO packets (provider, digits, digit6, digit8, digit10, barcode, status, scan_time)
         VALUES (?, ?, ?, ?, ?, ?, 'in_shop', ?)

@@ -53,7 +53,7 @@ def init_db():
         )
     """)
 
-    # Lightweight migration: ensure variant columns exist if DB predated change
+    # Lightweight migration: ensure variant columns exist and cleanup legacy names
     for table in ("packets", "customer_entries", "collected_log"):
         try:
             c.execute(f"PRAGMA table_info({table})")
@@ -61,6 +61,24 @@ def init_db():
             for col in ("digit6", "digit8", "digit10"):
                 if col not in existing_cols:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+            # Rename legacy digits6/8/10 -> digit6/8/10 if needed
+            c.execute(f"PRAGMA table_info({table})")
+            cols2 = [r[1] for r in c.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols2 and want not in cols2:
+                    try:
+                        c.execute(f"ALTER TABLE {table} RENAME COLUMN {legacy} TO {want}")
+                    except Exception:
+                        pass
+            # Drop legacy if redundant (best-effort)
+            c.execute(f"PRAGMA table_info({table})")
+            cols3 = [r[1] for r in c.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols3 and want in cols3:
+                    try:
+                        c.execute(f"ALTER TABLE {table} DROP COLUMN {legacy}")
+                    except Exception:
+                        pass
         except Exception:
             pass
 

@@ -49,6 +49,25 @@ def _write_zpl_to_device(zpl: str, printer: str) -> None:
     with open(printer, "wb") as p:
         p.write(zpl.encode("utf-8"))
 
+def _derive_variant_from_barcode(code, n):
+    """Mirror 4-digit extraction rules for N in {6,8,10}.
+
+    - If ends with two digits: use last N
+    - If ends with two letters: take N before those two
+    - If ends with digit+letter and len>=N+7: slice s[-(N+7):-7]
+    - Else: fallback to last N if available
+    """
+    if not code:
+        return None
+    s = str(code).strip()
+    if len(s) >= n and s[-2:].isdigit():
+        return s[-n:]
+    if len(s) >= n + 2 and s[-2:].isalpha():
+        return s[-(n + 2):-2]
+    if len(s) >= n + 7 and s[-1].isalpha() and s[-2].isdigit():
+        return s[-(n + 7):-7]
+    return s[-n:] if len(s) >= n else None
+
 # ---------- SQLite helpers ----------
 def open_db():
     """Open a SQLite connection configured for concurrent reads/writes."""
@@ -129,7 +148,7 @@ def run_migrations():
             )
             """
         )
-        # Migration: ensure variant columns exist in case of pre-existing DB
+        # Migration: ensure desired variant columns exist; handle legacy names
         for table in ("packets", "customer_entries", "collected_log"):
             cur.execute(f"PRAGMA table_info({table})")
             existing = [r[1] for r in cur.fetchall()]
@@ -137,6 +156,24 @@ def run_migrations():
                 if col not in existing:
                     try:
                         cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+                    except sqlite3.OperationalError:
+                        pass
+            # Rename legacy columns digits6/8/10 -> digit6/8/10 when needed
+            cur.execute(f"PRAGMA table_info({table})")
+            cols2 = [r[1] for r in cur.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols2 and want not in cols2:
+                    try:
+                        cur.execute(f"ALTER TABLE {table} RENAME COLUMN {legacy} TO {want}")
+                    except sqlite3.OperationalError:
+                        pass
+            # Drop legacy columns if both exist (best-effort; may be unsupported)
+            cur.execute(f"PRAGMA table_info({table})")
+            cols3 = [r[1] for r in cur.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols3 and want in cols3:
+                    try:
+                        cur.execute(f"ALTER TABLE {table} DROP COLUMN {legacy}")
                     except sqlite3.OperationalError:
                         pass
         cur.execute("PRAGMA table_info(customer_entries)")
@@ -189,6 +226,27 @@ def run_migrations():
         start_cleanup_scheduler()
     except Exception:
         # non-fatal: if thread can't start, app still runs
+        pass
+
+    # Backfill digit6/8/10 for existing rows based on barcode (best-effort)
+    try:
+        conn = open_db()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, barcode, digit6, digit8, digit10 FROM packets
+            WHERE barcode IS NOT NULL AND (digit6 IS NULL OR digit8 IS NULL OR digit10 IS NULL)
+            """
+        )
+        rows = cur.fetchall()
+        for rid, barcode, d6, d8, d10 in rows:
+            n6 = d6 or _derive_variant_from_barcode(barcode, 6)
+            n8 = d8 or _derive_variant_from_barcode(barcode, 8)
+            n10 = d10 or _derive_variant_from_barcode(barcode, 10)
+            cur.execute("UPDATE packets SET digit6=?, digit8=?, digit10=? WHERE id=?", (n6, n8, n10, rid))
+        conn.commit()
+        conn.close()
+    except Exception:
         pass
 
 
