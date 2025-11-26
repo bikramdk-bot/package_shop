@@ -15,18 +15,41 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT NOT NULL,
             digits TEXT NOT NULL,
+            digit6 TEXT,
+            digit8 TEXT,
+            digit10 TEXT,
             barcode TEXT,
             status TEXT DEFAULT 'in_shop',
             scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migration for existing DB: add variant columns if missing
+    try:
+        cursor.execute("PRAGMA table_info(packets)")
+        cols = [r[1] for r in cursor.fetchall()]
+        for col in ("digit6", "digit8", "digit10"):
+            if col not in cols:
+                cursor.execute(f"ALTER TABLE packets ADD COLUMN {col} TEXT")
+        conn.commit()
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
 
 # ---------------------- INSERT ----------------------
+def _variant_slice(s: str, n: int) -> str | None:
+    if not s:
+        return None
+    s = s.strip()
+    return s[-n:] if len(s) >= n else None
+
 def insert_parcel(provider, digits, barcode=None):
-    """Insert a new packet entry (only if not already in_shop)."""
+    """Insert a new packet entry (only if not already in_shop).
+
+    Variant columns (digit6/8/10) are simple tail slices of the raw barcode
+    if provided (NULL otherwise). No frontend dependency.
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -38,10 +61,13 @@ def insert_parcel(provider, digits, barcode=None):
         conn.close()
         return {"warning": "Packet already exists and is in_shop."}
 
+    digit6 = _variant_slice(barcode, 6)
+    digit8 = _variant_slice(barcode, 8)
+    digit10 = _variant_slice(barcode, 10)
     cursor.execute("""
-        INSERT INTO packets (provider, digits, barcode, status, scan_time)
-        VALUES (?, ?, ?, 'in_shop', ?)
-    """, (provider, digits, barcode, datetime.now()))
+        INSERT INTO packets (provider, digits, digit6, digit8, digit10, barcode, status, scan_time)
+        VALUES (?, ?, ?, ?, ?, ?, 'in_shop', ?)
+    """, (provider, digits, digit6, digit8, digit10, barcode, datetime.now()))
     conn.commit()
     conn.close()
     return {"message": "Packet inserted successfully."}

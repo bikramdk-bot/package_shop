@@ -13,6 +13,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT,
             digits TEXT,
+            digit6 TEXT,
+            digit8 TEXT,
+            digit10 TEXT,
             barcode TEXT,
             status TEXT DEFAULT 'in_shop',
             scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -25,6 +28,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT,
             digits TEXT,
+            digit6 TEXT,
+            digit8 TEXT,
+            digit10 TEXT,
             kode TEXT,
             collection_id TEXT,
             status TEXT DEFAULT 'active',
@@ -38,11 +44,25 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider TEXT,
         digits TEXT,
+        digit6 TEXT,
+        digit8 TEXT,
+        digit10 TEXT,
         barcode TEXT,
         log_type TEXT DEFAULT 'auto_match',
         collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Lightweight migration: ensure variant columns exist if DB predated change
+    for table in ("packets", "customer_entries", "collected_log"):
+        try:
+            c.execute(f"PRAGMA table_info({table})")
+            existing_cols = [r[1] for r in c.fetchall()]
+            for col in ("digit6", "digit8", "digit10"):
+                if col not in existing_cols:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+        except Exception:
+            pass
 
 
     conn.commit()

@@ -87,6 +87,9 @@ def run_migrations():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT NOT NULL,
                 digits TEXT NOT NULL,
+                digit6 TEXT,
+                digit8 TEXT,
+                digit10 TEXT,
                 barcode TEXT,
                 status TEXT DEFAULT 'in_shop',
                 scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -99,6 +102,9 @@ def run_migrations():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT NOT NULL,
                 digits TEXT NOT NULL,
+                digit6 TEXT,
+                digit8 TEXT,
+                digit10 TEXT,
                 kode TEXT,
                 collection_id TEXT,
                 status TEXT DEFAULT 'pending',
@@ -114,12 +120,25 @@ def run_migrations():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT,
                 digits TEXT,
+                digit6 TEXT,
+                digit8 TEXT,
+                digit10 TEXT,
                 barcode TEXT,
                 log_type TEXT,
                 collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        # Migration: ensure variant columns exist in case of pre-existing DB
+        for table in ("packets", "customer_entries", "collected_log"):
+            cur.execute(f"PRAGMA table_info({table})")
+            existing = [r[1] for r in cur.fetchall()]
+            for col in ("digit6", "digit8", "digit10"):
+                if col not in existing:
+                    try:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+                    except sqlite3.OperationalError:
+                        pass
         cur.execute("PRAGMA table_info(customer_entries)")
         cols = [r[1] for r in cur.fetchall()]
         if 'kode' not in cols:
