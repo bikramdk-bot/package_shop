@@ -35,5 +35,74 @@
       <button type="submit">Activate Token</button>
     </form>
   </div>
+
+  <div class="card" style="margin-top:1rem;">
+    <h1>Wi‑Fi</h1>
+    <div class="muted" id="wifi-status">Checking Wi‑Fi status…</div>
+    <div class="row" style="margin-top:0.75rem;">
+      <select id="ssid" style="flex:1; padding:0.6rem 0.7rem; border:1px solid #d1d5db; border-radius:8px; font-size:1rem;"></select>
+      <button type="button" id="scan">Scan Networks</button>
+    </div>
+    <div class="row">
+      <input type="text" id="password" placeholder="Password (leave empty for open)" />
+      <button type="button" id="connect">Connect</button>
+    </div>
+    <div class="alert" id="wifi-msg" style="display:none;"></div>
+  </div>
+
+  <script>
+    async function refreshStatus(){
+      try{
+        const r = await fetch('/wifi/status');
+        const s = await r.json();
+        const el = document.getElementById('wifi-status');
+        const mode = s.mode || (s.ssid ? 'wifi' : 'hotspot');
+        el.textContent = `Mode: ${mode} | SSID: ${s.ssid || '—'} | IP: ${s.ip || '—'}`;
+      }catch(e){
+        document.getElementById('wifi-status').textContent = 'Status unavailable';
+      }
+    }
+    async function scan(){
+      const sel = document.getElementById('ssid');
+      sel.innerHTML = '';
+      try{
+        const r = await fetch('/wifi/scan');
+        const j = await r.json();
+        (j.networks || []).forEach(n => {
+          const opt = document.createElement('option');
+          opt.value = n.ssid;
+          opt.textContent = `${n.ssid} (${n.signal || ''})`;
+          sel.appendChild(opt);
+        });
+      }catch(e){
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Scan failed';
+        sel.appendChild(opt);
+      }
+    }
+    async function connect(){
+      const ssid = document.getElementById('ssid').value;
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('wifi-msg');
+      msg.style.display = 'none';
+      try{
+        const r = await fetch('/wifi/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid, password})});
+        const j = await r.json();
+        msg.textContent = j.message || (j.success ? 'Connected' : 'Failed');
+        msg.className = 'alert ' + (j.success ? 'success' : 'error');
+        msg.style.display = 'block';
+        refreshStatus();
+      }catch(e){
+        msg.textContent = 'Connection error';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
+    document.getElementById('scan').addEventListener('click', scan);
+    document.getElementById('connect').addEventListener('click', connect);
+    refreshStatus();
+    scan();
+  </script>
 </body>
 </html>
