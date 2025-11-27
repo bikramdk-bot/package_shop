@@ -405,14 +405,20 @@ def lookup_parcel():
             c2 = conn.cursor()
             c2.execute(
                         """
-                        SELECT id, provider, digits, barcode FROM packets
-                        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                          AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
-                        ORDER BY datetime(scan_time) DESC
-                        LIMIT 1
-                        """,
-                        (e["provider"], e["digits"], e["digits"], e["digits"]),
-                    )
+                                                SELECT id, provider, digits, barcode FROM packets
+                                                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+                                                    AND (
+                                                                digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
+                                                         OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
+                                                         OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
+                                                    )
+                                                ORDER BY datetime(scan_time) DESC
+                                                LIMIT 1
+                                                """,
+                                                (e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
+                                                 e["digits"], e["digits"], e["digits"], e["digits"],
+                                                 e["digits"], e["digits"], e["digits"], e["digits"]),
+                                        )
             packet = c2.fetchone()
             if packet:
                 c2.execute(
@@ -509,8 +515,21 @@ def lookup_parcel():
         # matched flag (only consider packets still in shop), case-insensitive provider
         c2 = conn.cursor()
         c2.execute(
-            "SELECT COUNT(*) FROM packets WHERE UPPER(provider)=UPPER(?) AND status='in_shop' AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)",
-            (e["provider"], e["digits"], e["digits"], e["digits"]))
+            """
+            SELECT COUNT(*) FROM packets
+            WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+              AND (
+                    digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
+                 OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
+                 OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
+              )
+            """,
+            (
+                e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
+                e["digits"], e["digits"], e["digits"], e["digits"],
+                e["digits"], e["digits"], e["digits"], e["digits"]
+            )
+        )
         e["matched"] = c2.fetchone()[0] > 0
         # remaining time starts after number_assigned_at
         start_str = e.get("number_assigned_at")
@@ -601,13 +620,19 @@ def get_customer_entries():
         # 2️⃣ Check if packet matched
         c2.execute(
                         """
-                        SELECT id, provider, digits, barcode FROM packets
-                        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                            AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
-                        ORDER BY datetime(scan_time) DESC
-                        LIMIT 1
-                        """,
-                        (e["provider"], e["digits"], e["digits"], e["digits"]))
+                                                SELECT id, provider, digits, barcode FROM packets
+                                                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+                                                    AND (
+                                                                digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
+                                                         OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
+                                                         OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
+                                                    )
+                                                ORDER BY datetime(scan_time) DESC
+                                                LIMIT 1
+                                                """,
+                                                (e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
+                                                 e["digits"], e["digits"], e["digits"], e["digits"],
+                                                 e["digits"], e["digits"], e["digits"], e["digits"]))
         packet = c2.fetchone()
 
         if packet:
@@ -841,13 +866,19 @@ def resolve_entry():
     if provider and digits:
         c2.execute(
             """
-            SELECT id, provider, digits, barcode FROM packets
-            WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-              AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
-            ORDER BY datetime(scan_time) DESC
-            LIMIT 1
-            """,
-            (provider, digits, digits, digits),
+                        SELECT id, provider, digits, barcode FROM packets
+                        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+                            AND (
+                                        digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
+                                 OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
+                                 OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
+                            )
+                        ORDER BY datetime(scan_time) DESC
+                        LIMIT 1
+                        """,
+                        (provider, digits, digits, digits, digits,
+                         digits, digits, digits, digits,
+                         digits, digits, digits, digits),
         )
         packet = c2.fetchone()
     if packet:
