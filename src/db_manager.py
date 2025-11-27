@@ -13,6 +13,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT,
             digits TEXT,
+            digit6 TEXT,
+            digit8 TEXT,
+            digit10 TEXT,
             barcode TEXT,
             status TEXT DEFAULT 'in_shop',
             scan_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -25,6 +28,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             provider TEXT,
             digits TEXT,
+            digit6 TEXT,
+            digit8 TEXT,
+            digit10 TEXT,
             kode TEXT,
             collection_id TEXT,
             status TEXT DEFAULT 'active',
@@ -38,11 +44,43 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         provider TEXT,
         digits TEXT,
+        digit6 TEXT,
+        digit8 TEXT,
+        digit10 TEXT,
         barcode TEXT,
         log_type TEXT DEFAULT 'auto_match',
         collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Lightweight migration: ensure variant columns exist and cleanup legacy names
+    for table in ("packets", "customer_entries", "collected_log"):
+        try:
+            c.execute(f"PRAGMA table_info({table})")
+            existing_cols = [r[1] for r in c.fetchall()]
+            for col in ("digit6", "digit8", "digit10"):
+                if col not in existing_cols:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+            # Rename legacy digits6/8/10 -> digit6/8/10 if needed
+            c.execute(f"PRAGMA table_info({table})")
+            cols2 = [r[1] for r in c.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols2 and want not in cols2:
+                    try:
+                        c.execute(f"ALTER TABLE {table} RENAME COLUMN {legacy} TO {want}")
+                    except Exception:
+                        pass
+            # Drop legacy if redundant (best-effort)
+            c.execute(f"PRAGMA table_info({table})")
+            cols3 = [r[1] for r in c.fetchall()]
+            for legacy, want in (("digits6","digit6"),("digits8","digit8"),("digits10","digit10")):
+                if legacy in cols3 and want in cols3:
+                    try:
+                        c.execute(f"ALTER TABLE {table} DROP COLUMN {legacy}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
 
     conn.commit()
