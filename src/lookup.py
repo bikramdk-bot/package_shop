@@ -57,7 +57,11 @@ def _variant_from_barcode(code, n):
     return s[-n:] if len(s) >= n else None
 
 def insert_parcel(provider, digits, barcode=None):
-    """Insert a new packet entry (only if not already in_shop).
+    """Insert a new packet entry.
+
+    Duplicate prevention rule: if a row with the same provider and barcode
+    already exists with status 'in_shop', block the new insert. The 4 digits
+    do not affect duplicate detection.
 
     Variant columns (digit6/8/10) are simple tail slices of the raw barcode
     if provided (NULL otherwise). No frontend dependency.
@@ -65,21 +69,30 @@ def insert_parcel(provider, digits, barcode=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT COUNT(*) FROM packets
-        WHERE provider = ? AND digits = ? AND status = 'in_shop'
-    """, (provider, digits))
-    if cursor.fetchone()[0] > 0:
-        conn.close()
-        return {"warning": "Packet already exists and is in_shop."}
+    # If a barcode is provided, use provider+barcode to detect duplicates in_shop.
+    # If no barcode is provided, do not block based on digits (as requested).
+    if barcode:
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM packets
+            WHERE UPPER(provider) = UPPER(?) AND barcode = ? AND status = 'in_shop'
+            """,
+            (provider, barcode),
+        )
+        if cursor.fetchone()[0] > 0:
+            conn.close()
+            return {"warning": "Packet already exists (same provider+barcode) and is in_shop."}
 
     digit6 = _variant_from_barcode(barcode, 6)
     digit8 = _variant_from_barcode(barcode, 8)
     digit10 = _variant_from_barcode(barcode, 10)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO packets (provider, digits, digit6, digit8, digit10, barcode, status, scan_time)
         VALUES (?, ?, ?, ?, ?, ?, 'in_shop', ?)
-    """, (provider, digits, digit6, digit8, digit10, barcode, datetime.now()))
+        """,
+        (provider, digits, digit6, digit8, digit10, barcode, datetime.now()),
+    )
     conn.commit()
     conn.close()
     return {"message": "Packet inserted successfully."}
