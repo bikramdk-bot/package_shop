@@ -9,6 +9,7 @@ from license_manager import (
 import sqlite3, os
 from datetime import datetime, timedelta, date
 import threading, time
+from wifi_manager import scan_networks, set_credentials, current_status
 
 app = Flask(__name__)
 
@@ -1106,6 +1107,31 @@ def set_print_mode():
     except Exception as e:
         return jsonify({"error": "Failed to set print mode", "details": str(e)}), 500
     return jsonify({"print": bool(p)})
+
+# ---------------------- WIFI MANAGEMENT ----------------------
+@app.route("/wifi/scan", methods=["GET"])
+def wifi_scan():
+    try:
+        nets = scan_networks()
+        return jsonify({"networks": nets})
+    except Exception as e:
+        return jsonify({"error": "scan_failed", "detail": str(e)}), 500
+
+@app.route("/wifi/configure", methods=["POST"])
+def wifi_configure():
+    data = request.get_json(force=True) or {}
+    ssid = (data.get("ssid") or "").strip()
+    password = (data.get("password") or "").strip()
+    ok, msg = set_credentials(ssid, password)
+    status = current_status()
+    return jsonify({"success": ok, "message": msg, "status": status}), (200 if ok else 400)
+
+@app.route("/wifi/status", methods=["GET"])
+def wifi_status():
+    try:
+        return jsonify(current_status())
+    except Exception as e:
+        return jsonify({"error": "status_failed", "detail": str(e)}), 500
 
 # ---------------------- KIOSK: CREATE ENTRY + ASSIGN COLLECTION ----------------------
 @app.route("/customer_entry", methods=["POST"])
