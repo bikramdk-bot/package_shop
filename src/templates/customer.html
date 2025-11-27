@@ -463,8 +463,8 @@
 
   async function submitCustomerEntry(kode) {
       const payload = { provider: selectedProvider };
-      // For UPS/Bring, send kode and omit digits; otherwise send digits and kode if present
-      if (selectedProvider === 'UPS' || selectedProvider === 'Bring') {
+      // For Bring, send kode and omit digits; others (incl. UPS) send digits
+      if (selectedProvider === 'Bring') {
         payload.kode = kode;
       } else {
         payload.digits = inputDigits;
