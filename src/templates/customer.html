@@ -393,16 +393,15 @@
       lastLookupCount = results.length || 0;
 
       if (['PostNord','GLS','DAO','UPS','DHL'].includes(selectedProvider)) {
+        // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
-          // Clash: multiple matches for the provided digits. Escalate from 4 -> 6 -> 8
           if (targetLen === 4) {
             targetLen = 6;
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            // Use i18n clash message and prompt
-            msg.textContent = (i18n?.[currentLang]?.clash_multiple_6) || 'Beklager — der er flere pakker. Indtast 6 cifre.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast6) || 'Indtast de sidste 6 cifre';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_6) || 'Multiple packets match. Please enter the last 6 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
             return;
           }
           if (targetLen === 6) {
@@ -410,21 +409,55 @@
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            msg.textContent = (i18n?.[currentLang]?.clash_multiple_8) || 'Ingen entydig match — indtast de sidste 8 cifre.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast8) || 'Indtast de sidste 8 cifre';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_8) || 'Multiple packets match. Please enter the last 8 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast8) || 'Enter the last 8 digits';
+            return;
+          }
+          if (targetLen === 8) {
+            targetLen = 10;
+            inputDigits = '';
+            renderInputBoxes(targetLen);
+            msg.className = 'msg error';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_10) || 'Multiple packets match. Please enter the last 10 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+            return;
+          }
+          if (targetLen === 10) {
+            // Still multiple even with 10 digits -> ask to contact staff
+            msg.className = 'msg error';
+            msg.textContent = (i18n?.[currentLang]?.stillMultipleAt10ContactStaff) || 'Multiple parcels match. Please contact staff.';
             return;
           }
         }
+        // Handle no match: keep normal error except at 8 where we escalate to 10
         if (results.length === 0) {
+          if (targetLen === 8) {
+            targetLen = 10;
+            inputDigits = '';
+            renderInputBoxes(targetLen);
+            msg.className = 'msg error';
+            msg.textContent = (i18n?.[currentLang]?.noMatchAsk10) || 'No match found. Please enter the last 10 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+            return;
+          }
           msg.classList.add('error');
-          msg.textContent = (i18n?.[currentLang]?.noMatch)||'Ingen match fundet. Prøv igen.';
+          msg.textContent = (i18n?.[currentLang]?.noMatch)||'No match found. Try again.';
           return;
         }
-        // DAO requires kode after we have a match
-        if (selectedProvider === 'DAO') { openKodeModal(); return; }
-        // Otherwise submit entry immediately
-        await submitCustomerEntry();
-        return;
+        // Unique match
+        if (results.length === 1) {
+          if (targetLen === 10) {
+            // After 10 digits, instruct to contact staff instead of auto-proceed
+            msg.className = 'msg success';
+            msg.textContent = (i18n?.[currentLang]?.uniqueAt10ContactStaff) || 'Unique match found. Please contact staff.';
+            return;
+          }
+          // DAO requires kode after we have a match
+          if (selectedProvider === 'DAO') { openKodeModal(); return; }
+          // Otherwise submit entry immediately
+          await submitCustomerEntry();
+          return;
+        }
       }
     }
 

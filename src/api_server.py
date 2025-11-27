@@ -338,16 +338,31 @@ def lookup_parcel():
             conn = open_db()
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute(
-                """
+            # Choose column by input length: 4->digits, 6->digit6, 8->digit8, 10->digit10
+            n = len(digs)
+            if n >= 10:
+                col = "digit10"
+            elif n >= 8:
+                col = "digit8"
+            elif n >= 6:
+                col = "digit6"
+            else:
+                col = "digits"
+            # Build query: match by chosen column, with lenient suffix matching fallback
+            q = f"""
                 SELECT id, provider, digits, barcode FROM packets
                 WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                  AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
+                  AND (
+                        {col} = ?
+                     OR {col} LIKE '%' || ?
+                     OR ? LIKE '%' || COALESCE({col}, '')
+                     OR barcode = ?
+                     OR barcode LIKE '%' || ?
+                  )
                 ORDER BY datetime(scan_time) DESC
                 LIMIT 50
-                """,
-                (prov, digs, digs, digs),
-            )
+            """
+            c.execute(q, (prov, digs, digs, digs, digs, digs))
             rows = [dict(r) for r in c.fetchall()]
             conn.close()
             return jsonify({"results": rows})
