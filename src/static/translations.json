@@ -99,7 +99,13 @@
     "printModeEnabled": "Udskrivning aktiveret",
     "printModeDisabled": "Udskrivning deaktiveret",
     "printToggleSuccess": "Indstilling opdateret",
-    "printToggleFail": "Kunne ikke opdatere indstilling"
+    "printToggleFail": "Kunne ikke opdatere indstilling",
+    "scanQr": "Scan QR",
+    "scanQrTitle": "Scan QR-kode",
+    "scanQrHelp": "Hold QR-koden i rammen",
+    "cameraError": "Kunne ikke få adgang til kameraet.",
+    "qrNotSupported": "QR-scanning understøttes ikke i denne browser.",
+    "qrNoDigits": "Kunne ikke læse cifre fra QR."
   },
   "en": {
     "title": "Customer Check-in",
@@ -201,7 +207,13 @@
     "printModeEnabled": "Printing enabled",
     "printModeDisabled": "Printing disabled",
     "printToggleSuccess": "Setting updated",
-    "printToggleFail": "Failed to update setting"
+    "printToggleFail": "Failed to update setting",
+    "scanQr": "Scan QR",
+    "scanQrTitle": "Scan QR Code",
+    "scanQrHelp": "Hold the QR inside the frame",
+    "cameraError": "Could not access camera.",
+    "qrNotSupported": "QR scanning not supported in this browser.",
+    "qrNoDigits": "Could not read digits from QR."
   },
   "de": {
     "title": "Kunden-Check-in",
@@ -303,7 +315,13 @@
     "printModeEnabled": "Drucken aktiviert",
     "printModeDisabled": "Drucken deaktiviert",
     "printToggleSuccess": "Einstellung aktualisiert",
-    "printToggleFail": "Einstellung konnte nicht aktualisiert werden"
+    "printToggleFail": "Einstellung konnte nicht aktualisiert werden",
+    "scanQr": "QR scannen",
+    "scanQrTitle": "QR-Code scannen",
+    "scanQrHelp": "Halten Sie den QR-Code im Rahmen",
+    "cameraError": "Kamera konnte nicht verwendet werden.",
+    "qrNotSupported": "QR-Scanning wird in diesem Browser nicht unterstützt.",
+    "qrNoDigits": "Konnte keine Ziffern aus dem QR lesen."
   },
   "sv": {
     "title": "Kundincheckning",
@@ -405,6 +423,12 @@
     "printModeEnabled": "Utskrift aktiverad",
     "printModeDisabled": "Utskrift inaktiverad",
     "printToggleSuccess": "Inställning uppdaterad",
-    "printToggleFail": "Kunde inte uppdatera inställning"
+    "printToggleFail": "Kunde inte uppdatera inställning",
+    "scanQr": "Skanna QR",
+    "scanQrTitle": "Skanna QR-kod",
+    "scanQrHelp": "Håll QR-koden i ramen",
+    "cameraError": "Kunde inte komma åt kameran.",
+    "qrNotSupported": "QR-skanning stöds inte i denna webbläsare.",
+    "qrNoDigits": "Kunde inte läsa siffror från QR."
   }
 }

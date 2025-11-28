@@ -105,6 +105,8 @@
     .btn { border: 0; border-radius: 12px; padding: 14px 18px; font-size: 18px; font-weight: 700; cursor: pointer; }
     .btn-primary { background: var(--primary); color: white; }
     .btn-ghost { background: #eef2ff; color: #1f2937; }
+    .btn-icon { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 16px; }
+    .icon { width: 18px; height: 18px; display: inline-block; }
 
     .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 6px; }
     .msg.error { color: var(--danger); }
@@ -172,10 +174,29 @@
           <div id="boxes" class="boxes" aria-live="polite"></div>
           <div id="helper" class="helper"></div>
           <div class="actions">
+            <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
+              <span class="icon" aria-hidden="true">📷</span>
+              <span data-i18n="scanQr">Scan QR</span>
+            </button>
             <button class="btn btn-ghost" onclick="clearInput()" data-i18n="clear">Ryd</button>
             <button id="submitBtn" class="btn btn-primary" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
           </div>
           <div id="message" class="msg"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Scan modal -->
+  <div id="qrOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+    <div class="modal">
+      <h3 id="qrTitle" data-i18n="scanQrTitle">Scan QR-kode</h3>
+      <div style="display:flex; flex-direction:column; gap:10px; align-items:center;">
+        <video id="qrVideo" playsinline style="width:min(520px,90vw); border-radius:12px; background:#111; aspect-ratio: 4/3;"></video>
+        <div id="qrHelp" class="helper" data-i18n="scanQrHelp">Hold QR-koden i rammen</div>
+        <div id="qrError" class="msg error" style="display:none;"></div>
+        <div class="actions">
+          <button class="btn btn-ghost" onclick="closeQrScanner()" data-i18n="back">Tilbage</button>
         </div>
       </div>
     </div>
@@ -257,6 +278,38 @@
     let lastLookupCount = 0; // optional hint only
     let sessionId = null; // generated only when customer finishes (No, finish)
     let entryIds = []; // accumulate entry IDs for this session
+    // QR-driven auto-escalation
+    let qrRawCode = null; // full scanned QR string (raw)
+    let isQrAuto = false; // when true, handleSubmit will auto-advance using qrSessionDigits
+    function extractDigitsByRule(code, n) {
+      if (!code || !n) return '';
+      const s = String(code).trim().toUpperCase();
+      // Helpers
+      const lastTwo = s.slice(-2);
+      const isTwoDigits = /^\d{2}$/.test(lastTwo);
+      const isTwoLetters = /^[A-Z]{2}$/.test(lastTwo);
+      const lastIsAlpha = /[A-Z]$/.test(s);
+      const secondLastIsDigit = /\d$/.test(s.slice(-2, -1));
+
+      // Case 1: last two are digits → take last n digits from end of string
+      if (isTwoDigits) {
+        const digits = s.replace(/\D+/g, '');
+        return digits.slice(-n);
+      }
+      // Case 2: last two are letters → take the n characters before them, then filter digits
+      if (isTwoLetters && s.length >= n + 2) {
+        const seg = s.slice(-(n + 2), -2);
+        return (seg.match(/\d/g) || []).join('').slice(-n);
+      }
+      // Case 3: last is letter and second-last is digit → mirror Python offset rule generalized by n
+      if (lastIsAlpha && secondLastIsDigit && s.length >= n + 7) {
+        const seg = s.slice(-(n + 7), -7);
+        return (seg.match(/\d/g) || []).join('').slice(-n);
+      }
+      // Fallback: take last n digits across the whole string
+      const digits = s.replace(/\D+/g, '');
+      return digits.slice(-n);
+    }
 
     function renderProviders() {
       const wrap = document.getElementById('providers');
@@ -297,6 +350,10 @@
   else if (selectedProvider === 'Bring') targetLen = 5; // Bring asks 5-digit afhentningskode directly
   else targetLen = 4; // PostNord/GLS/UPS/DHL start with 4
       renderInputBoxes(targetLen, p.color);
+      // show Scan QR for flows starting with last-4 (i.e., not Bring)
+      const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
+      const qrBtn = document.getElementById('scanQrBtn');
+      if (qrBtn) qrBtn.style.display = showQr ? '' : 'none';
       focusActiveBox();
       // Set a clearer prompt for UPS/Bring 5-digit code entry
         if (selectedProvider === 'Bring') {
@@ -397,6 +454,15 @@
         if (results.length > 1) {
           if (targetLen === 4) {
             targetLen = 6;
+            if (isQrAuto && qrRawCode) {
+              inputDigits = extractDigitsByRule(qrRawCode, 6);
+              if (inputDigits.length === 6) {
+                renderInputBoxes(targetLen);
+                // auto-continue
+                await new Promise(r=>setTimeout(r, 50));
+                return handleSubmit();
+              }
+            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
@@ -406,6 +472,14 @@
           }
           if (targetLen === 6) {
             targetLen = 8;
+            if (isQrAuto && qrRawCode) {
+              inputDigits = extractDigitsByRule(qrRawCode, 8);
+              if (inputDigits.length === 8) {
+                renderInputBoxes(targetLen);
+                await new Promise(r=>setTimeout(r, 50));
+                return handleSubmit();
+              }
+            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
@@ -415,6 +489,14 @@
           }
           if (targetLen === 8) {
             targetLen = 10;
+            if (isQrAuto && qrRawCode) {
+              inputDigits = extractDigitsByRule(qrRawCode, 10);
+              if (inputDigits.length === 10) {
+                renderInputBoxes(targetLen);
+                await new Promise(r=>setTimeout(r, 50));
+                return handleSubmit();
+              }
+            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
@@ -426,6 +508,8 @@
             // Still multiple even with 10 digits -> ask to contact staff
             msg.className = 'msg error';
             msg.textContent = (i18n?.[currentLang]?.stillMultipleAt10ContactStaff) || 'Multiple parcels match. Please contact staff.';
+            // stop QR auto
+            isQrAuto = false; qrRawCode = null;
             return;
           }
         }
@@ -433,6 +517,14 @@
         if (results.length === 0) {
           if (targetLen === 8) {
             targetLen = 10;
+            if (isQrAuto && qrRawCode) {
+              inputDigits = extractDigitsByRule(qrRawCode, 10);
+              if (inputDigits.length === 10) {
+                renderInputBoxes(targetLen);
+                await new Promise(r=>setTimeout(r, 50));
+                return handleSubmit();
+              }
+            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
@@ -442,6 +534,8 @@
           }
           msg.classList.add('error');
           msg.textContent = (i18n?.[currentLang]?.noMatch)||'No match found. Try again.';
+          // stop QR auto if first 4 didn't match
+          isQrAuto = false; qrRawCode = null;
           return;
         }
         // Unique match
@@ -450,11 +544,13 @@
             // After 10 digits, instruct to contact staff instead of auto-proceed
             msg.className = 'msg success';
             msg.textContent = (i18n?.[currentLang]?.uniqueAt10ContactStaff) || 'Unique match found. Please contact staff.';
+            isQrAuto = false; qrRawCode = null;
             return;
           }
           // DAO requires kode after we have a match
-          if (selectedProvider === 'DAO') { openKodeModal(); return; }
+          if (selectedProvider === 'DAO') { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
           // Otherwise submit entry immediately
+          isQrAuto = false; qrRawCode = null;
           await submitCustomerEntry();
           return;
         }
@@ -561,6 +657,11 @@
       inputDigits=''; lastLookupCount=0; // keep provider
       renderInputBoxes(targetLen);
       document.getElementById('message').textContent = '';
+      const qrBtn = document.getElementById('scanQrBtn');
+      if (qrBtn) {
+        const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
+        qrBtn.style.display = showQr ? '' : 'none';
+      }
       setTimeout(()=>focusActiveBox(), 50);
     }
     async function assignCustomerNumber() {
@@ -618,6 +719,133 @@
       if (hdr) { hdr.setAttribute('data-i18n','haveMorePackets'); applyI18n(); }
       const ticketInfo = document.getElementById('ticketInfo');
       if (ticketInfo) { ticketInfo.style.display='none'; ticketInfo.textContent=''; ticketInfo.className='msg success'; }
+      const qrBtn = document.getElementById('scanQrBtn');
+      if (qrBtn) qrBtn.style.display = 'none';
+    }
+
+    // --- QR Scanner ---
+    let qrStream = null;            // Used in BarcodeDetector path
+    let qrDetector = null;          // BarcodeDetector instance
+    let qrScanActive = false;       // BarcodeDetector loop flag
+    let zxingReader = null;         // ZXing reader instance (fallback)
+    let zxingActive = false;        // ZXing active flag
+    async function ensureZxingLoaded() {
+      if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return true;
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+        s.async = true;
+        s.onload = () => resolve(true);
+        s.onerror = () => reject(new Error('ZXing load failed'));
+        document.head.appendChild(s);
+      });
+    }
+    async function openQrScanner() {
+      // only allow if provider is selected and we start with 4-digit flow
+      if (!selectedProvider) return;
+      try {
+        document.getElementById('qrOverlay').classList.add('show');
+        document.getElementById('qrError').style.display='none';
+        await startQrScanner();
+      } catch (e) {
+        const err = document.getElementById('qrError');
+        err.textContent = (i18n?.[currentLang]?.cameraError) || 'Could not access camera.';
+        err.style.display = 'block';
+      }
+    }
+    async function startQrScanner() {
+      const video = document.getElementById('qrVideo');
+      // Prefer native BarcodeDetector when available
+      if ('BarcodeDetector' in window) {
+        try {
+          const constraints = { video: { facingMode: 'environment' } };
+          qrStream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = qrStream;
+          await video.play();
+          const formats = ['qr_code'];
+          qrDetector = new window.BarcodeDetector({ formats });
+          qrScanActive = true;
+          requestAnimationFrame(qrDetectLoop);
+          return;
+        } catch (e) {
+          // fall through to ZXing
+        }
+      }
+      // Fallback to ZXing
+      try {
+        await ensureZxingLoaded();
+        const ZX = window.ZXing;
+        zxingReader = new ZX.BrowserMultiFormatReader();
+        const devices = await zxingReader.listVideoInputDevices();
+        let deviceId = undefined;
+        if (devices && devices.length) {
+          // Prefer back/environment camera when available
+          const back = devices.find(d => /back|rear|environment/i.test(d.label));
+          deviceId = (back && back.deviceId) || devices[0].deviceId;
+        }
+        zxingActive = true;
+        zxingReader.decodeFromVideoDevice(deviceId, 'qrVideo', async (result, err, controls) => {
+          if (!zxingActive) return;
+          if (result && result.text) {
+            zxingActive = false;
+            try { controls && controls.stop && controls.stop(); } catch {}
+            try { zxingReader && zxingReader.reset && zxingReader.reset(); } catch {}
+            zxingReader = null;
+            await onQrDetected(result.text);
+          }
+          // ignore decode errors; ZXing continues scanning
+        });
+      } catch (e) {
+        const err = document.getElementById('qrError');
+        err.textContent = (i18n?.[currentLang]?.qrNotSupported) || 'QR scanning not supported in this browser.';
+        err.style.display = 'block';
+      }
+    }
+    async function qrDetectLoop() {
+      if (!qrScanActive || !qrDetector) return;
+      const video = document.getElementById('qrVideo');
+      try {
+        const codes = await qrDetector.detect(video);
+        if (codes && codes.length > 0) {
+          const raw = codes[0].rawValue || '';
+          await onQrDetected(raw);
+          return; // stop after first
+        }
+      } catch {}
+      if (qrScanActive) requestAnimationFrame(qrDetectLoop);
+    }
+    async function onQrDetected(text) {
+      // stop camera and close overlay quickly to continue flow
+      await closeQrScanner();
+      const raw = String(text || '').trim().toUpperCase();
+      const initial = extractDigitsByRule(raw, 4);
+      if (!initial || initial.length < 4) {
+        const msg = document.getElementById('message');
+        msg.className = 'msg error';
+        msg.textContent = (i18n?.[currentLang]?.qrNoDigits) || 'Could not read digits from QR.';
+        return;
+      }
+      // seed QR session and kick off existing flow
+      qrRawCode = raw;
+      isQrAuto = true;
+      targetLen = 4; // ensure we start at 4
+      inputDigits = initial;
+      renderInputBoxes(targetLen);
+      await new Promise(r=>setTimeout(r, 50));
+      handleSubmit();
+    }
+    async function closeQrScanner() {
+      try {
+        // Stop BarcodeDetector path
+        qrScanActive = false;
+        if (qrStream) { try { qrStream.getTracks().forEach(t => t.stop()); } catch {} qrStream = null; }
+        qrDetector = null;
+        // Stop ZXing path
+        if (zxingReader) { try { zxingReader.reset(); } catch {} zxingReader = null; }
+        zxingActive = false;
+      } finally {
+        document.getElementById('qrOverlay').classList.remove('show');
+      }
     }
 
     // Init
