@@ -724,9 +724,22 @@
     }
 
     // --- QR Scanner ---
-    let qrStream = null;
-    let qrDetector = null;
-    let qrScanActive = false;
+    let qrStream = null;            // Used in BarcodeDetector path
+    let qrDetector = null;          // BarcodeDetector instance
+    let qrScanActive = false;       // BarcodeDetector loop flag
+    let zxingReader = null;         // ZXing reader instance (fallback)
+    let zxingActive = false;        // ZXing active flag
+    async function ensureZxingLoaded() {
+      if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return true;
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+        s.async = true;
+        s.onload = () => resolve(true);
+        s.onerror = () => reject(new Error('ZXing load failed'));
+        document.head.appendChild(s);
+      });
+    }
     async function openQrScanner() {
       // only allow if provider is selected and we start with 4-digit flow
       if (!selectedProvider) return;
@@ -742,18 +755,47 @@
     }
     async function startQrScanner() {
       const video = document.getElementById('qrVideo');
-      const constraints = { video: { facingMode: 'environment' } };
-      qrStream = await navigator.mediaDevices.getUserMedia(constraints);
-      video.srcObject = qrStream;
-      await video.play();
-      // BarcodeDetector API
+      // Prefer native BarcodeDetector when available
       if ('BarcodeDetector' in window) {
-        const formats = ['qr_code'];
-        qrDetector = new window.BarcodeDetector({ formats });
-        qrScanActive = true;
-        requestAnimationFrame(qrDetectLoop);
-      } else {
-        // No built-in QR detector
+        try {
+          const constraints = { video: { facingMode: 'environment' } };
+          qrStream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = qrStream;
+          await video.play();
+          const formats = ['qr_code'];
+          qrDetector = new window.BarcodeDetector({ formats });
+          qrScanActive = true;
+          requestAnimationFrame(qrDetectLoop);
+          return;
+        } catch (e) {
+          // fall through to ZXing
+        }
+      }
+      // Fallback to ZXing
+      try {
+        await ensureZxingLoaded();
+        const ZX = window.ZXing;
+        zxingReader = new ZX.BrowserMultiFormatReader();
+        const devices = await zxingReader.listVideoInputDevices();
+        let deviceId = undefined;
+        if (devices && devices.length) {
+          // Prefer back/environment camera when available
+          const back = devices.find(d => /back|rear|environment/i.test(d.label));
+          deviceId = (back && back.deviceId) || devices[0].deviceId;
+        }
+        zxingActive = true;
+        zxingReader.decodeFromVideoDevice(deviceId, 'qrVideo', async (result, err, controls) => {
+          if (!zxingActive) return;
+          if (result && result.text) {
+            zxingActive = false;
+            try { controls && controls.stop && controls.stop(); } catch {}
+            try { zxingReader && zxingReader.reset && zxingReader.reset(); } catch {}
+            zxingReader = null;
+            await onQrDetected(result.text);
+          }
+          // ignore decode errors; ZXing continues scanning
+        });
+      } catch (e) {
         const err = document.getElementById('qrError');
         err.textContent = (i18n?.[currentLang]?.qrNotSupported) || 'QR scanning not supported in this browser.';
         err.style.display = 'block';
@@ -794,12 +836,13 @@
     }
     async function closeQrScanner() {
       try {
+        // Stop BarcodeDetector path
         qrScanActive = false;
-        if (qrStream) {
-          qrStream.getTracks().forEach(t => t.stop());
-          qrStream = null;
-        }
+        if (qrStream) { try { qrStream.getTracks().forEach(t => t.stop()); } catch {} qrStream = null; }
         qrDetector = null;
+        // Stop ZXing path
+        if (zxingReader) { try { zxingReader.reset(); } catch {} zxingReader = null; }
+        zxingActive = false;
       } finally {
         document.getElementById('qrOverlay').classList.remove('show');
       }
