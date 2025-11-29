@@ -45,7 +45,11 @@
     </div>
     <div class="row">
       <input type="text" id="password" placeholder="Password (leave empty for open)" />
+      <label style="display:flex; align-items:center; gap:0.4rem;">
+        <input type="checkbox" id="hidden-ssid" /> Hidden SSID
+      </label>
       <button type="button" id="connect">Connect</button>
+      <button type="button" id="disconnect" style="background:#ef4444;">Disconnect</button>
     </div>
     <div class="alert" id="wifi-msg" style="display:none;"></div>
   </div>
@@ -56,24 +60,38 @@
         const r = await fetch('/wifi/status');
         const s = await r.json();
         const el = document.getElementById('wifi-status');
-        const mode = s.mode || (s.ssid ? 'wifi' : 'hotspot');
-        el.textContent = `Mode: ${mode} | SSID: ${s.ssid || '—'} | IP: ${s.ip || '—'}`;
+        const mode = s.mode || (s.client_ssid ? 'wifi' : (s.ap_name ? 'hotspot' : 'unknown'));
+        const client = s.client_ssid || s.ssid || '—';
+        const ap = s.ap_name || '—';
+        el.textContent = `Mode: ${mode} | Client: ${client} | AP: ${ap} | IP: ${s.ip || '—'}`;
       }catch(e){
         document.getElementById('wifi-status').textContent = 'Status unavailable';
       }
     }
     async function scan(){
       const sel = document.getElementById('ssid');
+      const msg = document.getElementById('wifi-msg');
       sel.innerHTML = '';
       try{
         const r = await fetch('/wifi/scan');
         const j = await r.json();
+        if(j.ap_cycled){
+          msg.textContent = 'Hotspot briefly paused to improve scan results.';
+          msg.className = 'alert success';
+          msg.style.display = 'block';
+        }
         (j.networks || []).forEach(n => {
           const opt = document.createElement('option');
           opt.value = n.ssid;
-          opt.textContent = `${n.ssid} (${n.signal || ''})`;
+            opt.textContent = `${n.ssid} (${n.signal || ''})`;
           sel.appendChild(opt);
         });
+        if(!sel.children.length){
+          const opt = document.createElement('option');
+          opt.value='';
+          opt.textContent='No networks found';
+          sel.appendChild(opt);
+        }
       }catch(e){
         const opt = document.createElement('option');
         opt.value = '';
@@ -84,10 +102,11 @@
     async function connect(){
       const ssid = document.getElementById('ssid').value;
       const password = document.getElementById('password').value;
+      const hidden = document.getElementById('hidden-ssid').checked;
       const msg = document.getElementById('wifi-msg');
       msg.style.display = 'none';
       try{
-        const r = await fetch('/wifi/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid, password})});
+        const r = await fetch('/wifi/configure', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid, password, hidden})});
         const j = await r.json();
         msg.textContent = j.message || (j.success ? 'Connected' : 'Failed');
         msg.className = 'alert ' + (j.success ? 'success' : 'error');
@@ -99,8 +118,27 @@
         msg.style.display = 'block';
       }
     }
+    // AP pause/resume happens automatically during scan/connect; no manual buttons.
+    async function disconnect(){
+      const msg = document.getElementById('wifi-msg');
+      msg.style.display = 'none';
+      try{
+        const r = await fetch('/wifi/disconnect', {method:'POST'});
+        const j = await r.json();
+        msg.textContent = j.message || (j.success ? 'Disconnected' : 'Failed to disconnect');
+        msg.className = 'alert ' + (j.success ? 'success' : 'error');
+        msg.style.display = 'block';
+        refreshStatus();
+      }catch(e){
+        msg.textContent = 'Disconnect error';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
     document.getElementById('scan').addEventListener('click', scan);
     document.getElementById('connect').addEventListener('click', connect);
+    // removed manual pause/resume buttons
+    document.getElementById('disconnect').addEventListener('click', disconnect);
     refreshStatus();
     scan();
   </script>

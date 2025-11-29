@@ -9,7 +9,7 @@ from license_manager import (
 import sqlite3, os
 from datetime import datetime, timedelta, date
 import threading, time
-from wifi_manager import scan_networks, set_credentials, current_status
+from wifi_manager import scan_networks, set_credentials, current_status, pause_ap, resume_ap, disconnect_wifi
 
 app = Flask(__name__)
 
@@ -291,6 +291,61 @@ def start_cleanup_scheduler(interval_hours: int = 24):
 
     t = threading.Thread(target=loop, daemon=True)
     t.start()
+
+# ---------------------- WIFI API ----------------------
+@app.route("/wifi/status", methods=["GET"])
+def wifi_status():
+    try:
+        return jsonify(current_status())
+    except Exception as e:
+        return jsonify({"ssid": "", "ip": "", "mode": "unknown", "error": str(e)}), 500
+
+
+@app.route("/wifi/scan", methods=["GET"])
+def wifi_scan():
+    nets = scan_networks()
+    ap_cycled = any(isinstance(n.get("_meta"), dict) and n["_meta"].get("ap_cycled") for n in nets)
+    return jsonify({"networks": nets, "ap_cycled": ap_cycled})
+
+
+@app.route("/wifi/configure", methods=["POST"])
+def wifi_configure():
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get("ssid") or "").strip()
+    password = (data.get("password") or "").strip()
+    hidden = bool(data.get("hidden"))
+    if not ssid:
+        return jsonify({"success": False, "message": "Missing SSID"}), 400
+    # Temporarily pause AP to allow connection
+    try:
+        pause_ap()
+    except Exception:
+        pass
+    ok, msg = set_credentials(ssid, password, hidden=hidden)
+    # Resume AP regardless to keep tablet access
+    try:
+        resume_ap()
+    except Exception:
+        pass
+    return jsonify({"success": ok, "message": msg})
+
+
+@app.route("/wifi/pause-ap", methods=["POST"]) 
+def api_pause_ap():
+    ok, msg = pause_ap()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
+
+
+@app.route("/wifi/resume-ap", methods=["POST"]) 
+def api_resume_ap():
+    ok, msg = resume_ap()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
+
+
+@app.route("/wifi/disconnect", methods=["POST"]) 
+def api_disconnect_wifi():
+    ok, msg = disconnect_wifi()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
 
 
 def get_setting(key: str, default: str = None):
@@ -1108,30 +1163,7 @@ def set_print_mode():
         return jsonify({"error": "Failed to set print mode", "details": str(e)}), 500
     return jsonify({"print": bool(p)})
 
-# ---------------------- WIFI MANAGEMENT ----------------------
-@app.route("/wifi/scan", methods=["GET"])
-def wifi_scan():
-    try:
-        nets = scan_networks()
-        return jsonify({"networks": nets})
-    except Exception as e:
-        return jsonify({"error": "scan_failed", "detail": str(e)}), 500
-
-@app.route("/wifi/configure", methods=["POST"])
-def wifi_configure():
-    data = request.get_json(force=True) or {}
-    ssid = (data.get("ssid") or "").strip()
-    password = (data.get("password") or "").strip()
-    ok, msg = set_credentials(ssid, password)
-    status = current_status()
-    return jsonify({"success": ok, "message": msg, "status": status}), (200 if ok else 400)
-
-@app.route("/wifi/status", methods=["GET"])
-def wifi_status():
-    try:
-        return jsonify(current_status())
-    except Exception as e:
-        return jsonify({"error": "status_failed", "detail": str(e)}), 500
+ 
 
 # ---------------------- KIOSK: CREATE ENTRY + ASSIGN COLLECTION ----------------------
 @app.route("/customer_entry", methods=["POST"])
