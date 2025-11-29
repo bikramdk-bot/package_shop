@@ -33,12 +33,13 @@ def scan_networks() -> List[Dict[str, str]]:
     """
     nets: List[Dict[str, str]] = []
     if not _is_linux_pi():
+        # Dev fallback: return dummy networks on non‑Linux
         return [
             {"ssid": "ShopWiFi", "signal": "70", "security": "WPA2"},
             {"ssid": "Guest", "signal": "40", "security": "Open"},
         ]
 
-    # Prefer nmcli first while AP (hotspot) may still be active.
+    # Prefer nmcli
     try:
         out = subprocess.check_output([
             "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"
@@ -58,44 +59,6 @@ def scan_networks() -> List[Dict[str, str]]:
             return nets
     except Exception:
         pass
-
-    # If no networks found and hotspot likely blocking scan, try cycling AP off briefly.
-    ap_name = _ap_connection_name()
-    cycled_ap = False
-    if not nets and ap_name:
-        try:
-            subprocess.check_output(["nmcli", "connection", "down", ap_name], stderr=subprocess.STDOUT, text=True, timeout=6)
-            cycled_ap = True
-            # Short pause to let interface switch modes
-            time.sleep(1.0)
-            out2 = subprocess.check_output([
-                "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"
-            ], stderr=subprocess.STDOUT, text=True, timeout=8)
-            for line in out2.splitlines():
-                parts = line.split(":")
-                if len(parts) >= 3:
-                    ssid = parts[0].strip()
-                    if not ssid:
-                        continue
-                    nets.append({
-                        "ssid": ssid,
-                        "signal": parts[1].strip() or "",
-                        "security": parts[2].strip() or ""
-                    })
-        except Exception:
-            pass
-        finally:
-            # Restore AP so tablet keeps access
-            try:
-                subprocess.check_output(["nmcli", "connection", "up", ap_name], stderr=subprocess.STDOUT, text=True, timeout=8)
-            except Exception:
-                pass
-        # Annotate networks with meta flag if any found
-        if nets:
-            for n in nets:
-                n.setdefault("_meta", {})
-                if isinstance(n["_meta"], dict):
-                    n["_meta"]["ap_cycled"] = True
 
     # Fallback: iwlist (best effort)
     try:
