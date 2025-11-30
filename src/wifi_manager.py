@@ -18,6 +18,25 @@ def _load_watchdog_service() -> str:
         return ""
 
 
+def _load_ifaces() -> Tuple[str, str]:
+    """Return (ap_iface, client_iface) from shop_info.json or sensible defaults.
+
+    Defaults: ap_iface=wlan0, client_iface=wlan1.
+    """
+    ap_iface = os.environ.get("PSHOP_AP_IFACE", "wlan0").strip() or "wlan0"
+    client_iface = os.environ.get("PSHOP_CLIENT_IFACE", "wlan1").strip() or "wlan1"
+    try:
+        base = os.path.dirname(__file__)
+        cfg_path = os.path.join(base, "shop_info.json")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        ap_iface = (data.get("ap_iface") or ap_iface).strip() or ap_iface
+        client_iface = (data.get("client_iface") or client_iface).strip() or client_iface
+    except Exception:
+        pass
+    return ap_iface, client_iface
+
+
 def _is_linux_pi() -> bool:
     try:
         return platform.system() == "Linux"
@@ -41,8 +60,9 @@ def scan_networks() -> List[Dict[str, str]]:
 
     # Prefer nmcli
     try:
+        _, client_iface = _load_ifaces()
         out = subprocess.check_output([
-            "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"
+            "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "ifname", client_iface
         ], stderr=subprocess.STDOUT, text=True, timeout=8)
         for line in out.splitlines():
             parts = line.split(":")
@@ -142,7 +162,8 @@ def set_credentials(ssid: str, password: str, hidden: bool = False) -> Tuple[boo
     # Try nmcli connect
     try:
         # If password empty, attempt open network
-        cmd = ["nmcli", "device", "wifi", "connect", ssid]
+        _, client_iface = _load_ifaces()
+        cmd = ["nmcli", "device", "wifi", "connect", ssid, "ifname", client_iface]
         if password:
             cmd += ["password", password]
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True, timeout=20)
@@ -154,9 +175,10 @@ def set_credentials(ssid: str, password: str, hidden: bool = False) -> Tuple[boo
             try:
                 security = _nmcli_security_of_ssid(ssid)
                 key_mgmt = _derive_key_mgmt(security)
+                _, client_iface = _load_ifaces()
                 add_cmd = [
                     "nmcli", "connection", "add", "type", "wifi",
-                    "ifname", "wlan0", "con-name", ssid, "ssid", ssid
+                    "ifname", client_iface, "con-name", ssid, "ssid", ssid
                 ]
                 if key_mgmt:
                     add_cmd += ["wifi-sec.key-mgmt", key_mgmt]
@@ -165,6 +187,17 @@ def set_credentials(ssid: str, password: str, hidden: bool = False) -> Tuple[boo
                 if hidden or not security:
                     add_cmd += ["connection.autoconnect", "yes", "wifi.hidden", "yes"]
                 out = subprocess.check_output(add_cmd, stderr=subprocess.STDOUT, text=True, timeout=20)
+                # Ensure interface binding, autoconnect and preferred routing
+                try:
+                    subprocess.check_output([
+                        "nmcli", "connection", "modify", ssid,
+                        "connection.interface-name", client_iface,
+                        "connection.autoconnect", "yes",
+                        "ipv4.method", "auto",
+                        "ipv4.route-metric", "100"
+                    ], stderr=subprocess.STDOUT, text=True, timeout=10)
+                except Exception:
+                    pass
                 # Bring it up
                 out2 = subprocess.check_output(["nmcli", "connection", "up", ssid], stderr=subprocess.STDOUT, text=True, timeout=20)
                 return True, (out2.strip() or out.strip())
@@ -174,6 +207,17 @@ def set_credentials(ssid: str, password: str, hidden: bool = False) -> Tuple[boo
                 try:
                     sudo_add = ["sudo", "-n"] + add_cmd
                     out = subprocess.check_output(sudo_add, stderr=subprocess.STDOUT, text=True, timeout=20)
+                    try:
+                        _, client_iface = _load_ifaces()
+                        subprocess.check_output([
+                            "sudo", "-n", "nmcli", "connection", "modify", ssid,
+                            "connection.interface-name", client_iface,
+                            "connection.autoconnect", "yes",
+                            "ipv4.method", "auto",
+                            "ipv4.route-metric", "100"
+                        ], stderr=subprocess.STDOUT, text=True, timeout=10)
+                    except Exception:
+                        pass
                     out2 = subprocess.check_output(["sudo", "-n", "nmcli", "connection", "up", ssid], stderr=subprocess.STDOUT, text=True, timeout=20)
                     return True, (out2.strip() or out.strip())
                 except subprocess.CalledProcessError as e4:
@@ -203,12 +247,13 @@ def _ap_connection_name() -> str:
     if not _is_linux_pi():
         return ""
     try:
+        ap_iface, _ = _load_ifaces()
         out = subprocess.check_output(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show"], text=True)
         for line in out.splitlines():
             parts = line.split(":")
             if len(parts) >= 3:
                 name, ctype, dev = parts[0], parts[1], parts[2]
-                if ctype == "wifi" and dev == "wlan0" and name.upper().endswith("AP"):
+                if ctype == "wifi" and dev == ap_iface and name.upper().endswith("AP"):
                     return name
     except Exception:
         pass
@@ -219,6 +264,10 @@ def pause_ap() -> Tuple[bool, str]:
     """Temporarily bring down the hotspot/AP to allow scanning."""
     if not _is_linux_pi():
         return True, "AP paused (dev)"
+    ap_iface, client_iface = _load_ifaces()
+    # If we have a dedicated client interface, no need to pause the AP
+    if client_iface and ap_iface and client_iface != ap_iface:
+        return True, "No AP pause needed (separate client interface)"
     # Try to pause any AP watchdog to avoid auto re-enable during scanning
     wd = _load_watchdog_service()
     if wd:
@@ -294,21 +343,22 @@ def resume_ap() -> Tuple[bool, str]:
 
 
 def disconnect_wifi() -> Tuple[bool, str]:
-    """Disconnect current Wi‑Fi client connection on wlan0 (not the AP).
+    """Disconnect current Wi‑Fi client connection on client interface (not the AP).
 
-    Finds active wifi connection(s) on wlan0 that are not the hotspot name and brings them down.
+    Finds active wifi connection(s) on the configured client interface that are not the hotspot name and brings them down.
     """
     if not _is_linux_pi():
         return True, "Disconnected (dev)"
     ap_name = _ap_connection_name()
     try:
+        _, client_iface = _load_ifaces()
         out = subprocess.check_output(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE,ACTIVE", "connection", "show", "--active"], text=True)
         to_down = []
         for line in out.splitlines():
             parts = line.split(":")
             if len(parts) >= 4:
                 name, ctype, dev, active = parts[0], parts[1], parts[2], parts[3]
-                if ctype == "wifi" and dev == "wlan0" and active == "yes" and name != ap_name:
+                if ctype == "wifi" and dev == client_iface and active == "yes" and name != ap_name:
                     to_down.append(name)
         if not to_down:
             return True, "No client Wi‑Fi connection to disconnect"
@@ -336,7 +386,8 @@ def current_status() -> Dict[str, str]:
         client_ssid = ""
         ap_name = ""
         ip = ""
-        # Determine active connections on wlan0
+        ap_iface, client_iface = _load_ifaces()
+        # Determine active connections on configured interfaces
         try:
             out = subprocess.check_output([
                 "nmcli", "-t", "-f", "NAME,TYPE,DEVICE,ACTIVE", "connection", "show", "--active"
@@ -346,10 +397,10 @@ def current_status() -> Dict[str, str]:
                 parts = line.split(":")
                 if len(parts) >= 4:
                     name, ctype, dev, active = parts[0], parts[1], parts[2], parts[3]
-                    if ctype == "wifi" and dev == "wlan0" and active == "yes":
-                        if name == ap_guess or name.upper().endswith("AP"):
+                    if ctype == "wifi" and active == "yes":
+                        if dev == ap_iface and (name == ap_guess or name.upper().endswith("AP")):
                             ap_name = name
-                        else:
+                        if dev == client_iface and name != ap_guess and not name.upper().endswith("AP"):
                             client_ssid = name
         except Exception:
             pass

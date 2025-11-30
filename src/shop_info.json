@@ -1,4 +1,6 @@
 {
   "shop_id": "SHOP07",
-  "ap_watchdog_service": "wifi_watchdog.service"
+  "ap_watchdog_service": "wifi_watchdog.service",
+  "ap_iface": "wlan0",
+  "client_iface": "wlan1"
 }
