@@ -19,6 +19,9 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 # Default printer device (can be overridden by environment or request)
 PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
 
+# Path for external Wi-Fi status watcher JSON
+WIFI_STATUS_JSON = "/home/pi/wifi_status.json"
+
 
 def _build_zpl(lcn: str, digits: str) -> str:
     """Return ZPL for given LCN and digits."""
@@ -49,6 +52,24 @@ def _write_zpl_to_device(zpl: str, printer: str) -> None:
 
     with open(printer, "wb") as p:
         p.write(zpl.encode("utf-8"))
+
+@app.route("/wifi-status", methods=["GET"])
+def wifi_status_file():
+    """Return JSON produced by the external wlan1 watcher.
+
+    If file missing or malformed, return { wifi_connected_ip: null }.
+    """
+    try:
+        if os.path.exists(WIFI_STATUS_JSON):
+            with open(WIFI_STATUS_JSON, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # Normalize key and value
+            ip = data.get("wifi_connected_ip")
+            if isinstance(ip, str) and ip.strip():
+                return jsonify({"wifi_connected_ip": ip.strip()})
+    except Exception:
+        pass
+    return jsonify({"wifi_connected_ip": None})
 
 def _derive_variant_from_barcode(code, n):
     """Mirror 4-digit extraction rules for N in {6,8,10}.
