@@ -59,6 +59,16 @@
     <div class="alert" id="wifi-msg" style="display:none;"></div>
   </div>
 
+  <div class="card" style="margin-top:1rem;">
+    <h1>USB Scanner</h1>
+    <div class="muted">Select which USB scanner the system should use.</div>
+    <div class="row" style="margin-top:0.75rem;">
+      <select id="scanner-select" style="flex:1; padding:0.6rem 0.7rem; border:1px solid #d1d5db; border-radius:8px; font-size:1rem;"></select>
+      <button type="button" id="save-scanner">Save Scanner</button>
+    </div>
+    <div class="alert" id="scanner-msg" style="display:none;"></div>
+  </div>
+
   <script>
     async function refreshStatus(){
       try{
@@ -184,6 +194,68 @@
     scan();
     pollWlan1Ip();
     setInterval(pollWlan1Ip, 3000);
+
+    // Scanner management
+    async function loadScanners(){
+      const sel = document.getElementById('scanner-select');
+      const msg = document.getElementById('scanner-msg');
+      sel.innerHTML = '';
+      try{
+        const r = await fetch('/list-scanners');
+        const j = await r.json();
+        const available = j.available || [];
+        const current = j.current || '';
+        if(!available.length){
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No scanners found';
+          sel.appendChild(opt);
+        }else{
+          available.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            sel.appendChild(opt);
+          });
+          if(current && current.startsWith('/dev/input/by-id/')){
+            const basename = current.substring('/dev/input/by-id/'.length);
+            sel.value = basename;
+          }
+        }
+        msg.style.display = 'none';
+      }catch(e){
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Failed to list scanners';
+        sel.appendChild(opt);
+      }
+    }
+
+    async function saveScanner(){
+      const sel = document.getElementById('scanner-select');
+      const name = sel.value;
+      const msg = document.getElementById('scanner-msg');
+      msg.style.display = 'none';
+      try{
+        const r = await fetch('/set-scanner', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({scanner_path: name})});
+        const j = await r.json();
+        const ok = !!j.ok;
+        const text = j.message || j.warning || (ok ? 'Updated' : (j.error || 'Failed'));
+        msg.textContent = text || 'Scanner updated, restarting system…';
+        msg.className = 'alert ' + (ok ? 'success' : 'error');
+        msg.style.display = 'block';
+        if(ok){
+          msg.textContent = 'Scanner updated, restarting system…';
+        }
+      }catch(e){
+        msg.textContent = 'Save error';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
+
+    document.getElementById('save-scanner').addEventListener('click', saveScanner);
+    loadScanners();
   </script>
 </body>
 </html>

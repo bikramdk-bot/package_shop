@@ -11,7 +11,13 @@ import re
 
 # --- CONFIG ---
 PRINTER_DEVICE = "/dev/usb/lp0"
-SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
+# Load scanner path from Pi config file with safe fallback
+try:
+    with open("/home/pi/config/shop_info.json", "r", encoding="utf-8") as f:
+        _cfg = json.load(f)
+    SCANNER_PATH = _cfg.get("scanner_path", "/dev/input/by-id/usb-0581_011c-event-kbd")
+except Exception:
+    SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 
 # LCN detection: treat purely alphabetic tokens (legacy behavior).
 # Previously the code supported a SPECIAL_LCN_MATCH prefix and an

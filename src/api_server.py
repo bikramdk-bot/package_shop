@@ -10,6 +10,9 @@ import sqlite3, os
 from datetime import datetime, timedelta, date
 import threading, time
 from wifi_manager import scan_networks, set_credentials, current_status, pause_ap, resume_ap, disconnect_wifi
+import json
+import subprocess
+import glob
 
 app = Flask(__name__)
 
@@ -21,6 +24,37 @@ PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
 
 # Path for external Wi-Fi status watcher JSON
 WIFI_STATUS_JSON = "/home/pi/wifi_status.json"
+
+# Config path for shop info on Pi
+SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
+
+def read_shop_info():
+    try:
+        with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def write_shop_info(patch: dict):
+    data = read_shop_info()
+    if not isinstance(data, dict):
+        data = {}
+    data.update(patch)
+    os.makedirs(os.path.dirname(SHOP_INFO_PATH), exist_ok=True)
+    with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _restart_api_service():
+    # Restart the main systemd unit for this app.
+    # Based on user confirmation, the unit name is package_shop.service.
+    service = "package_shop.service"
+    try:
+        subprocess.check_output(["sudo", "systemctl", "restart", service], stderr=subprocess.STDOUT, text=True, timeout=10)
+        return True, None
+    except subprocess.CalledProcessError as e:
+        return False, f"systemctl failed: {e.output}"
+    except Exception as e:
+        return False, str(e)
 
 
 def _build_zpl(lcn: str, digits: str) -> str:
@@ -52,6 +86,35 @@ def _write_zpl_to_device(zpl: str, printer: str) -> None:
 
     with open(printer, "wb") as p:
         p.write(zpl.encode("utf-8"))
+
+@app.route("/list-scanners", methods=["GET"])
+def list_scanners():
+    # Find all by-id entries ending with event-kbd
+    paths = sorted(glob.glob("/dev/input/by-id/*event-kbd"))
+    names = [os.path.basename(p) for p in paths]
+    current = read_shop_info().get("scanner_path")
+    return jsonify({"available": names, "current": current})
+
+@app.route("/set-scanner", methods=["POST"])
+def set_scanner():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = payload.get("scanner_path")
+    if not isinstance(name, str) or not name:
+        return jsonify({"ok": False, "error": "scanner_path required"}), 400
+    full = f"/dev/input/by-id/{name}"
+    # Update config without removing other fields
+    try:
+        write_shop_info({"scanner_path": full})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to write config: {e}"}), 500
+    # Restart the api server service
+    ok, err = _restart_api_service()
+    if not ok:
+        return jsonify({"ok": True, "warning": f"Scanner updated but restart failed: {err}"})
+    return jsonify({"ok": True, "message": "Scanner updated, restarting system…"})
 
 @app.route("/wifi-status", methods=["GET"])
 def wifi_status_file():
