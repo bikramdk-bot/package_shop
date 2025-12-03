@@ -28,13 +28,34 @@ WIFI_STATUS_JSON = "/home/pi/wifi_status.json"
 
 # Config path for shop info on Pi
 SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
+SHOP_INFO_DEFAULT_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
 
 def read_shop_info():
+    """Read shop configuration merging defaults and system overrides.
+
+    Loads bundled defaults from src/shop_info.json, then overlays values from
+    /home/pi/config/shop_info.json if present. Returns a dict (possibly empty).
+    """
+    data = {}
+    # Load defaults bundled with app
     try:
-        with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        if os.path.exists(SHOP_INFO_DEFAULT_PATH):
+            with open(SHOP_INFO_DEFAULT_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                data.update(d)
     except Exception:
-        return {}
+        pass
+    # Overlay with system config
+    try:
+        if os.path.exists(SHOP_INFO_PATH):
+            with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                data.update(d)
+    except Exception:
+        pass
+    return data
 
 def write_shop_info(patch: dict):
     data = read_shop_info()
@@ -44,6 +65,41 @@ def write_shop_info(patch: dict):
     os.makedirs(os.path.dirname(SHOP_INFO_PATH), exist_ok=True)
     with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_cpu_serial():
+    """Return Raspberry Pi CPU serial if available.
+
+    Tries device-tree then /proc/cpuinfo. Returns None if not found.
+    """
+    # Device tree path (preferred on modern systems)
+    try:
+        p = "/sys/firmware/devicetree/base/serial-number"
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                raw = f.read()
+            s = raw.replace(b"\x00", b"").decode(errors="ignore").strip()
+            if s:
+                return s
+    except Exception:
+        pass
+    # Fallback: parse /proc/cpuinfo
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.lower().startswith("serial\t:") or line.lower().startswith("serial:"):
+                    parts = line.split(":", 1)
+                    if len(parts) == 2:
+                        s = parts[1].strip()
+                        if s:
+                            return s
+    except Exception:
+        pass
+    return None
+
+def get_shop_meta():
+    cfg = read_shop_info() or {}
+    shop_id = cfg.get("shop_id") if isinstance(cfg, dict) else None
+    return {"shop_id": shop_id, "cpu_serial": get_cpu_serial()}
 
 def _restart_api_service():
     # Restart the main systemd unit for this app.
@@ -1518,7 +1574,15 @@ def dashboard():
 @app.route("/staff", methods=["GET"])
 def staff_dashboard():
     info = get_current_expiry()
-    return render_template("staff_dashboard.html", expiry=info.expiry_str, message=None, success=None)
+    meta = get_shop_meta()
+    return render_template(
+        "staff_dashboard.html",
+        expiry=info.expiry_str,
+        message=None,
+        success=None,
+        shop_id=meta.get("shop_id"),
+        cpu_serial=meta.get("cpu_serial"),
+    )
 
 
 @app.route("/activate", methods=["POST"])
@@ -1529,11 +1593,14 @@ def activate_token():
     )
     if not token:
         info = get_current_expiry()
+        meta = get_shop_meta()
         return render_template(
             "staff_dashboard.html",
             expiry=info.expiry_str,
             message="Missing token",
             success=False,
+            shop_id=meta.get("shop_id"),
+            cpu_serial=meta.get("cpu_serial"),
         ), 400
 
     success, message, info = apply_token(token)
@@ -1543,11 +1610,14 @@ def activate_token():
         return jsonify(payload), (200 if success else 400)
 
     final_info = info or get_current_expiry()
+    meta = get_shop_meta()
     return render_template(
         "staff_dashboard.html",
         expiry=final_info.expiry_str,
         message=message,
         success=success,
+        shop_id=meta.get("shop_id"),
+        cpu_serial=meta.get("cpu_serial"),
     ), (200 if success else 400)
 
 @app.route("/all_parcels")
