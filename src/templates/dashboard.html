@@ -197,7 +197,7 @@
         <td>${row.status}</td>
         <td>
           <button data-i18n="btnCollected" onclick="updateStatus('${row.provider}', '${row.digits}', 'collected')">✅ Collected</button>
-          <button data-i18n="btnDelete" onclick="deleteParcel('${row.provider}', '${row.digits}')">🗑️ Delete</button>
+          <button data-i18n="btnDelete" onclick="deleteParcel(${row.id})">🗑️ Delete</button>
         </td>`;
       tbody.appendChild(tr);
     });
@@ -212,11 +212,12 @@
     loadParcels();
   }
 
-  async function deleteParcel(provider, digits) {
+  async function deleteParcel(id) {
+    if (!id && id !== 0) return;
     await fetch('/delete_parcel', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({provider, digits})
+      body: JSON.stringify({id})
     });
     loadParcels();
   }

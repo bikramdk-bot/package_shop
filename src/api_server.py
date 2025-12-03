@@ -1676,19 +1676,19 @@ def update_status_api():
 @app.route("/delete_parcel", methods=["POST"])
 def delete_parcel_api():
     data = request.get_json(force=True)
-    provider = (data.get("provider") or "").strip()
-    digits = (data.get("digits") or "").strip()
-    if not provider or not digits:
-        return jsonify({"error": "Missing provider/digits"}), 400
+    try:
+        row_id = int(data.get("id"))
+    except Exception:
+        return jsonify({"error": "Missing or invalid id"}), 400
 
     conn = open_db()
     cursor = conn.cursor()
     cursor.execute(
         """
         DELETE FROM packets
-        WHERE UPPER(provider) = UPPER(?) AND digits = ?
+        WHERE id = ?
         """,
-        (provider, digits),
+        (row_id,),
     )
     conn.commit()
     conn.close()
