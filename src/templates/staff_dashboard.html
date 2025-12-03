@@ -101,17 +101,23 @@
         const btnWifi = document.getElementById('open-wlan1');
         const btnAp = document.getElementById('open-hotspot');
         const ip = j && j.wifi_connected_ip;
-        if(ip){
+        const mdns = j && (j.wifi_mdns || '');
+        const host = j && (j.wifi_hostname || '');
+        const targetHost = (mdns && mdns.trim()) || (ip && String(ip).trim()) || '';
+        if(targetHost){
           box.style.display = 'block';
           box.className = 'alert success';
-          box.textContent = `Wi‑Fi client IP: ${ip} | Staff URL: http://${ip}:5000`;
+          const ipPart = ip ? `IP: ${ip}` : 'IP: —';
+          const mdnsPart = mdns ? `Host: ${mdns}` : (host ? `Host: ${host}` : 'Host: —');
+          box.textContent = `Wi‑Fi client ${ipPart} | ${mdnsPart}`;
           btnWifi.disabled = false;
-          btnWifi.dataset.ip = ip;
+          const path = window.location.pathname || '/';
+          btnWifi.dataset.url = `http://${targetHost}:5000${path}`;
         }else{
           box.style.display = 'none';
           box.textContent = '';
           btnWifi.disabled = true;
-          btnWifi.dataset.ip = '';
+          btnWifi.dataset.url = '';
         }
         // Hotspot button always available (static IP 10.42.0.1)
         btnAp.disabled = false;
@@ -191,10 +197,9 @@
     // removed manual pause/resume buttons
     document.getElementById('disconnect').addEventListener('click', disconnect);
     document.getElementById('open-wlan1').addEventListener('click', () => {
-      const ip = document.getElementById('open-wlan1').dataset.ip;
-      if(!ip) return;
-      const path = window.location.pathname || '/';
-      window.location.href = `http://${ip}:5000${path}`;
+      const url = document.getElementById('open-wlan1').dataset.url;
+      if(!url) return;
+      window.location.href = url;
     });
     document.getElementById('open-hotspot').addEventListener('click', () => {
       const path = window.location.pathname || '/';
