@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, date
 import threading, time
 from wifi_manager import scan_networks, set_credentials, current_status, pause_ap, resume_ap, disconnect_wifi
 import json
+import socket
 import subprocess
 import glob
 
@@ -118,21 +119,59 @@ def set_scanner():
 
 @app.route("/wifi-status", methods=["GET"])
 def wifi_status_file():
-    """Return JSON produced by the external wlan1 watcher.
+    """Return Wi‑Fi client info for wlan1: IP and hostname.
 
-    If file missing or malformed, return { wifi_connected_ip: null }.
+    Primary source is the external watcher JSON (if present).
+    Fallback: compute IP from the configured client interface using `ip`.
+    Always include hostname fields when available.
     """
+    ip_val = None
+    # 1) Prefer watcher JSON if available
     try:
         if os.path.exists(WIFI_STATUS_JSON):
             with open(WIFI_STATUS_JSON, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # Normalize key and value
             ip = data.get("wifi_connected_ip")
             if isinstance(ip, str) and ip.strip():
-                return jsonify({"wifi_connected_ip": ip.strip()})
+                ip_val = ip.strip()
+    except Exception:
+        # ignore and try fallback
+        pass
+
+    # 2) Fallback: detect client iface and parse its IPv4
+    if not ip_val:
+        try:
+            cfg = read_shop_info()
+            iface = (
+                os.environ.get("PSHOP_CLIENT_IFACE")
+                or (cfg.get("client_iface") if isinstance(cfg, dict) else None)
+                or "wlan1"
+            )
+            out = subprocess.check_output(["ip", "-4", "addr", "show", iface], text=True)
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("inet "):
+                    # Example: inet 192.168.1.23/24 brd ... scope global wlan1
+                    ip_val = line.split()[1].split("/")[0]
+                    break
+        except Exception:
+            pass
+
+    # 3) Hostname information (helpful for mDNS like hostname.local)
+    host = None
+    mdns = None
+    try:
+        host = socket.gethostname() or None
+        if host:
+            mdns = f"{host}.local"
     except Exception:
         pass
-    return jsonify({"wifi_connected_ip": None})
+
+    return jsonify({
+        "wifi_connected_ip": (ip_val if ip_val else None),
+        "wifi_hostname": host,
+        "wifi_mdns": mdns,
+    })
 
 def _derive_variant_from_barcode(code, n):
     """Mirror 4-digit extraction rules for N in {6,8,10}.
