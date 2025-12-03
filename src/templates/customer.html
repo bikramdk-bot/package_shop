@@ -682,6 +682,46 @@
             ticketInfo.style.display = 'block';
             ticketInfo.textContent = '';
           }
+          // Show offer text shortly after number to reinforce recall
+          try {
+            setTimeout(async () => {
+              const r2 = await fetch('/offer_text');
+              if (r2.ok) {
+                const j2 = await r2.json();
+                const txt = (j2 && j2.offer_text || '').trim();
+                if (txt) {
+                  const offerElId = 'offerAfterNumber';
+                  let el = document.getElementById(offerElId);
+                  if (!el) {
+                    el = document.createElement('div');
+                    el.id = offerElId;
+                    // Optimized green styling: readable, attention-grabbing, but calm
+                    el.className = 'msg success';
+                    el.style.fontSize = '19px';
+                    el.style.fontWeight = '700';
+                    el.style.padding = '10px 12px';
+                    el.style.borderRadius = '10px';
+                    el.style.background = 'rgba(16,185,129,0.12)'; // light green tint
+                    el.style.color = '#065f46'; // deep teal for contrast
+                    el.style.margin = '10px 0 6px';
+                    el.style.textAlign = 'center';
+                    const modal = document.querySelector('#doneOverlay .modal');
+                    // Place it slightly higher: between header and ticket info
+                    const ticket = document.getElementById('ticketInfo');
+                    if (modal) {
+                      if (ticket) {
+                        modal.insertBefore(el, ticket);
+                      } else {
+                        modal.insertBefore(el, modal.querySelector('.actions'));
+                      }
+                    }
+                  }
+                  el.textContent = txt;
+                  el.style.display = 'block';
+                }
+              }
+            }, 1200);
+          } catch {}
           // Hide Yes/No, show only OK on the NO (ghost) button
           const yesBtn = document.getElementById('yesBtn');
           if (yesBtn) yesBtn.style.display = 'none';
@@ -719,6 +759,8 @@
       if (hdr) { hdr.setAttribute('data-i18n','haveMorePackets'); applyI18n(); }
       const ticketInfo = document.getElementById('ticketInfo');
       if (ticketInfo) { ticketInfo.style.display='none'; ticketInfo.textContent=''; ticketInfo.className='msg success'; }
+      const offerEl = document.getElementById('offerAfterNumber');
+      if (offerEl) { offerEl.remove(); }
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) qrBtn.style.display = 'none';
     }

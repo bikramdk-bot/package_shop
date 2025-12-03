@@ -454,6 +454,23 @@ def set_setting(key: str, value: str):
     finally:
         conn.close()
 
+# -------- Offer text (Tilbud) --------
+@app.route("/offer_text", methods=["GET"])
+def get_offer_text():
+    val = get_setting("offer_text", "")
+    return jsonify({"offer_text": val or ""})
+
+@app.route("/offer_text", methods=["POST"])
+def set_offer_text():
+    data = request.get_json(silent=True) or {}
+    txt = (data.get("offer_text") or "").strip()
+    try:
+        # Empty string means clear
+        set_setting("offer_text", txt)
+        return jsonify({"ok": True, "offer_text": txt})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # Ensure license token DB exists at startup (non-fatal if missing).
 # NOTE: removed automatic license normalization on startup so expired
 # licenses remain expired until explicitly extended by a token.
