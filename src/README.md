@@ -1,3 +1,58 @@
+## Staff Wi‑Fi Setup
+
+This app helps staff scan and connect the Pi to shop Wi‑Fi while using the Pi hotspot as a fallback.
+
+What the app does:
+- Temporarily pauses the hotspot (and stops `wifi_watchdog.service` + its timer) to improve scanning/connecting.
+- Scans with `nmcli` and shows all visible networks (you can be connected and still see others).
+- Connects using the correct security automatically:
+    - WPA/WPA2 → `wpa-psk`
+    - WPA3 → `sae`
+    - Open → no password
+- Resumes the hotspot and restarts the watchdog so the tablet reconnects.
+
+UI controls (Staff Settings → Wi‑Fi):
+- Scan Networks: pauses AP, scans, populates SSID list.
+- Password field + Hidden SSID toggle.
+- Connect: pauses AP, connects, then resumes AP.
+- Pause AP / Resume AP: manual control if you need extra time.
+- Disconnect: disconnects the current client Wi‑Fi (keeps AP intact).
+
+Permissions (NetworkManager):
+- If you see "Not authorized to control networking":
+    1) Run as root, or
+    2) Allow via polkit for users in `netdev` (recommended). Example rule `/etc/polkit-1/rules.d/10-nm.rules`:
+         ```javascript
+         polkit.addRule(function(action, subject) {
+             var allowed = [
+                 "org.freedesktop.NetworkManager.settings.modify.system",
+                 "org.freedesktop.NetworkManager.network-control",
+                 "org.freedesktop.NetworkManager.wifi.share.open",
+                 "org.freedesktop.NetworkManager.wifi.share.protected"
+             ];
+             if (allowed.indexOf(action.id) >= 0 && subject.isInGroup("netdev")) {
+                 return polkit.Result.YES;
+             }
+         });
+         ```
+         Then add your user to `netdev` and re-login.
+
+Watchdog integration:
+- Set the unit name in `shop_info.json` as `ap_watchdog_service` (e.g., `wifi_watchdog.service`). The app will stop/start both the service and its `.timer` around scanning/connecting.
+
+Country code (one-time, improves scanning):
+```bash
+sudo raspi-config nonint do_wifi_country DK
+sudo iw reg set DK
+sudo sed -i 's/^country=.*/country=DK/' /etc/wpa_supplicant/wpa_supplicant.conf || true
+grep -q '^country=' /etc/wpa_supplicant/wpa_supplicant.conf || echo 'country=DK' | sudo tee -a /etc/wpa_supplicant/wpa_supplicant.conf >/dev/null
+sudo systemctl restart NetworkManager
+```
+
+Notes:
+- When AP is up on `wlan0`, scanning can be limited. The app handles pausing the AP for accurate scans.
+- Hidden SSIDs: check the Hidden box if your SSID doesn’t appear in the list.
+- WPA3 networks require devices/driver support; the app selects `sae` automatically when detected.
 # Simplified License System + Staff Dashboard Integration
 
 This adds a small offline license system to the Packet Shop app with:

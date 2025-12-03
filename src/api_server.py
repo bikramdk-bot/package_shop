@@ -9,7 +9,10 @@ from license_manager import (
 import sqlite3, os
 from datetime import datetime, timedelta, date
 import threading, time
-from wifi_manager import scan_networks, set_credentials, current_status
+from wifi_manager import scan_networks, set_credentials, current_status, pause_ap, resume_ap, disconnect_wifi
+import json
+import subprocess
+import glob
 
 app = Flask(__name__)
 
@@ -18,6 +21,40 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 
 # Default printer device (can be overridden by environment or request)
 PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
+
+# Path for external Wi-Fi status watcher JSON
+WIFI_STATUS_JSON = "/home/pi/wifi_status.json"
+
+# Config path for shop info on Pi
+SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
+
+def read_shop_info():
+    try:
+        with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def write_shop_info(patch: dict):
+    data = read_shop_info()
+    if not isinstance(data, dict):
+        data = {}
+    data.update(patch)
+    os.makedirs(os.path.dirname(SHOP_INFO_PATH), exist_ok=True)
+    with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _restart_api_service():
+    # Restart the main systemd unit for this app.
+    # Based on user confirmation, the unit name is package_shop.service.
+    service = "package_shop.service"
+    try:
+        subprocess.check_output(["sudo", "systemctl", "restart", service], stderr=subprocess.STDOUT, text=True, timeout=10)
+        return True, None
+    except subprocess.CalledProcessError as e:
+        return False, f"systemctl failed: {e.output}"
+    except Exception as e:
+        return False, str(e)
 
 
 def _build_zpl(lcn: str, digits: str) -> str:
@@ -49,6 +86,53 @@ def _write_zpl_to_device(zpl: str, printer: str) -> None:
 
     with open(printer, "wb") as p:
         p.write(zpl.encode("utf-8"))
+
+@app.route("/list-scanners", methods=["GET"])
+def list_scanners():
+    # Find all by-id entries ending with event-kbd
+    paths = sorted(glob.glob("/dev/input/by-id/*event-kbd"))
+    names = [os.path.basename(p) for p in paths]
+    current = read_shop_info().get("scanner_path")
+    return jsonify({"available": names, "current": current})
+
+@app.route("/set-scanner", methods=["POST"])
+def set_scanner():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = payload.get("scanner_path")
+    if not isinstance(name, str) or not name:
+        return jsonify({"ok": False, "error": "scanner_path required"}), 400
+    full = f"/dev/input/by-id/{name}"
+    # Update config without removing other fields
+    try:
+        write_shop_info({"scanner_path": full})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to write config: {e}"}), 500
+    # Restart the api server service
+    ok, err = _restart_api_service()
+    if not ok:
+        return jsonify({"ok": True, "warning": f"Scanner updated but restart failed: {err}"})
+    return jsonify({"ok": True, "message": "Scanner updated, restarting system…"})
+
+@app.route("/wifi-status", methods=["GET"])
+def wifi_status_file():
+    """Return JSON produced by the external wlan1 watcher.
+
+    If file missing or malformed, return { wifi_connected_ip: null }.
+    """
+    try:
+        if os.path.exists(WIFI_STATUS_JSON):
+            with open(WIFI_STATUS_JSON, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            # Normalize key and value
+            ip = data.get("wifi_connected_ip")
+            if isinstance(ip, str) and ip.strip():
+                return jsonify({"wifi_connected_ip": ip.strip()})
+    except Exception:
+        pass
+    return jsonify({"wifi_connected_ip": None})
 
 def _derive_variant_from_barcode(code, n):
     """Mirror 4-digit extraction rules for N in {6,8,10}.
@@ -291,6 +375,61 @@ def start_cleanup_scheduler(interval_hours: int = 24):
 
     t = threading.Thread(target=loop, daemon=True)
     t.start()
+
+# ---------------------- WIFI API ----------------------
+@app.route("/wifi/status", methods=["GET"])
+def wifi_status():
+    try:
+        return jsonify(current_status())
+    except Exception as e:
+        return jsonify({"ssid": "", "ip": "", "mode": "unknown", "error": str(e)}), 500
+
+
+@app.route("/wifi/scan", methods=["GET"])
+def wifi_scan():
+    nets = scan_networks()
+    ap_cycled = any(isinstance(n.get("_meta"), dict) and n["_meta"].get("ap_cycled") for n in nets)
+    return jsonify({"networks": nets, "ap_cycled": ap_cycled})
+
+
+@app.route("/wifi/configure", methods=["POST"])
+def wifi_configure():
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get("ssid") or "").strip()
+    password = (data.get("password") or "").strip()
+    hidden = bool(data.get("hidden"))
+    if not ssid:
+        return jsonify({"success": False, "message": "Missing SSID"}), 400
+    # Temporarily pause AP to allow connection
+    try:
+        pause_ap()
+    except Exception:
+        pass
+    ok, msg = set_credentials(ssid, password, hidden=hidden)
+    # Resume AP regardless to keep tablet access
+    try:
+        resume_ap()
+    except Exception:
+        pass
+    return jsonify({"success": ok, "message": msg})
+
+
+@app.route("/wifi/pause-ap", methods=["POST"]) 
+def api_pause_ap():
+    ok, msg = pause_ap()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
+
+
+@app.route("/wifi/resume-ap", methods=["POST"]) 
+def api_resume_ap():
+    ok, msg = resume_ap()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
+
+
+@app.route("/wifi/disconnect", methods=["POST"]) 
+def api_disconnect_wifi():
+    ok, msg = disconnect_wifi()
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
 
 
 def get_setting(key: str, default: str = None):
@@ -1108,30 +1247,7 @@ def set_print_mode():
         return jsonify({"error": "Failed to set print mode", "details": str(e)}), 500
     return jsonify({"print": bool(p)})
 
-# ---------------------- WIFI MANAGEMENT ----------------------
-@app.route("/wifi/scan", methods=["GET"])
-def wifi_scan():
-    try:
-        nets = scan_networks()
-        return jsonify({"networks": nets})
-    except Exception as e:
-        return jsonify({"error": "scan_failed", "detail": str(e)}), 500
-
-@app.route("/wifi/configure", methods=["POST"])
-def wifi_configure():
-    data = request.get_json(force=True) or {}
-    ssid = (data.get("ssid") or "").strip()
-    password = (data.get("password") or "").strip()
-    ok, msg = set_credentials(ssid, password)
-    status = current_status()
-    return jsonify({"success": ok, "message": msg, "status": status}), (200 if ok else 400)
-
-@app.route("/wifi/status", methods=["GET"])
-def wifi_status():
-    try:
-        return jsonify(current_status())
-    except Exception as e:
-        return jsonify({"error": "status_failed", "detail": str(e)}), 500
+ 
 
 # ---------------------- KIOSK: CREATE ENTRY + ASSIGN COLLECTION ----------------------
 @app.route("/customer_entry", methods=["POST"])
