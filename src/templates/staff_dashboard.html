@@ -60,6 +60,16 @@
   </div>
 
   <div class="card" style="margin-top:1rem;">
+    <h1>Tilbud / Offer</h1>
+    <div class="muted">Add a short offer text shown to customers after their number appears. Empty then Apply clears it.</div>
+    <div class="row" style="margin-top:0.75rem;">
+      <input type="text" id="offerText" placeholder="e.g., Coca‑Cola 330ml – 12 kr" />
+      <button type="button" id="applyOffer">Apply</button>
+    </div>
+    <div class="alert" id="offerMsg" style="display:none;"></div>
+  </div>
+
+  <div class="card" style="margin-top:1rem;">
     <h1>USB Scanner</h1>
     <div class="muted">Select which USB scanner the system should use.</div>
     <div class="row" style="margin-top:0.75rem;">
@@ -194,6 +204,34 @@
     scan();
     pollWlan1Ip();
     setInterval(pollWlan1Ip, 3000);
+
+    // Offer text load/apply
+    async function loadOffer(){
+      try{
+        const r = await fetch('/offer_text');
+        const j = await r.json();
+        document.getElementById('offerText').value = j.offer_text || '';
+      }catch{}
+    }
+    async function applyOffer(){
+      const msg = document.getElementById('offerMsg');
+      msg.style.display='none';
+      const txt = document.getElementById('offerText').value;
+      try{
+        const r = await fetch('/offer_text', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({offer_text: txt})});
+        const j = await r.json();
+        const ok = !!j.ok || r.ok;
+        msg.textContent = ok ? (txt ? 'Offer saved' : 'Offer cleared') : (j.error || 'Failed to save');
+        msg.className = 'alert ' + (ok ? 'success' : 'error');
+        msg.style.display = 'block';
+      }catch(e){
+        msg.textContent = 'Error saving offer';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
+    document.getElementById('applyOffer').addEventListener('click', applyOffer);
+    loadOffer();
 
     // Scanner management
     async function loadScanners(){
