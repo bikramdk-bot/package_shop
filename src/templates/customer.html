@@ -119,6 +119,17 @@
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
+    /* Invisible input to reliably trigger Android soft keyboard */
+    .soft-kb-input {
+      position: fixed; /* keep it on-screen so mobile allows keyboard */
+      top: 0; left: 0;
+      width: 1px; height: 1px;
+      opacity: 0; border: 0; padding: 0; margin: 0;
+      background: transparent; color: transparent;
+      z-index: 1; /* below our UI but still focusable */
+      pointer-events: none;
+    }
+
     /* small confirmation blink for auto-submit */
     @keyframes blink {
       0% { transform: scale(1); opacity: 1; }
@@ -172,6 +183,18 @@
         <div class="input-area">
           <div id="prompt" class="prompt" data-i18n="prompt">Vælg udbyder og indtast cifre</div>
           <div id="boxes" class="boxes" aria-live="polite"></div>
+          <!-- Hidden-but-focusable input to open Android soft keyboard -->
+          <input
+            id="softKeyboardInput"
+            class="soft-kb-input"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="one-time-code"
+            autocapitalize="none"
+            autocorrect="off"
+            aria-hidden="true"
+          />
           <div id="helper" class="helper"></div>
           <div class="actions">
             <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
@@ -355,6 +378,8 @@
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) qrBtn.style.display = showQr ? '' : 'none';
       focusActiveBox();
+      // Focus invisible input to trigger Android soft keyboard
+      focusSoftKeyboard();
       // Set a clearer prompt for UPS/Bring 5-digit code entry
         if (selectedProvider === 'Bring') {
         document.getElementById('prompt').textContent = (i18n?.[currentLang]?.daoTitle) || 'Indtast 5-cifret afhentningskode';
@@ -369,6 +394,17 @@
     }
 
     // --- Digit boxes ---
+    let activeKeyHandler = null; // will point to handleKey or handleKodeKey depending on context
+    function globalKeydown(e) {
+      const activeEl = document.activeElement;
+      if (activeEl && activeEl.id === 'softKeyboardInput') {
+        // Hidden input is handling this; prevent duplicate forwarding
+        return;
+      }
+      if (typeof activeKeyHandler === 'function') {
+        activeKeyHandler(e);
+      }
+    }
     function renderInputBoxes(count, accent) {
       const boxes = document.getElementById('boxes');
       boxes.innerHTML = '';
@@ -380,10 +416,12 @@
         boxes.appendChild(b);
       }
       document.getElementById('helper').textContent = `${inputDigits.length}/${count}`;
-      // attach key handler
-      window.onkeydown = handleKey;
+      // set active handler for physical keyboards
+      activeKeyHandler = handleKey;
       // clear any pending auto-submit when re-rendering boxes
       if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; }
+      // keep soft keyboard visible if possible
+      focusSoftKeyboard();
     }
 
     // Auto-submit debounce timer (ms)
@@ -421,6 +459,20 @@
       // purely visual; boxes are not focusable inputs
       const act = document.querySelector('.box.active');
       if (act) act.scrollIntoView({block:'nearest', inline:'nearest'});
+    }
+    // Focus the hidden input to trigger mobile soft keyboard (Android Chrome)
+    function focusSoftKeyboard() {
+      const el = document.getElementById('softKeyboardInput');
+      if (!el) return;
+      try {
+        el.value = '';
+        el.focus({ preventScroll: true });
+        if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+        // Progressive enhancement: Chrome VirtualKeyboard API (if available)
+        if (navigator && navigator.virtualKeyboard && typeof navigator.virtualKeyboard.show === 'function') {
+          try { navigator.virtualKeyboard.show(); } catch {}
+        }
+      } catch {}
     }
     function clearInput() { inputDigits=''; renderInputBoxes(targetLen); document.getElementById('message').textContent=''; }
 
@@ -605,12 +657,14 @@
       kodeDigits='';
       renderKodeBoxes(5);
       document.getElementById('kodeOverlay').classList.add('show');
-      window.onkeydown = handleKodeKey; // redirect key events to kode modal
+      activeKeyHandler = handleKodeKey; // redirect key events to kode modal
       document.getElementById('kodeMsg').textContent = '';
+      // ensure keyboard is up for kode entry
+      focusSoftKeyboard();
     }
     function closeKode() {
       document.getElementById('kodeOverlay').classList.remove('show');
-      window.onkeydown = handleKey;
+      activeKeyHandler = handleKey;
     }
     function renderKodeBoxes(count) {
       const wrap = document.getElementById('kodeBoxes');
@@ -663,6 +717,7 @@
         qrBtn.style.display = showQr ? '' : 'none';
       }
       setTimeout(()=>focusActiveBox(), 50);
+      focusSoftKeyboard();
     }
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
@@ -890,12 +945,38 @@
       }
     }
 
+    // Bridge the hidden input's events to our current key handler
+    function setupSoftKeyboardBridge() {
+      const el = document.getElementById('softKeyboardInput');
+      if (!el) return;
+      const currentHandler = () => (typeof activeKeyHandler === 'function' ? activeKeyHandler : handleKey);
+      el.addEventListener('input', (e) => {
+        const v = e.target.value || '';
+        e.target.value = '';
+        e.stopPropagation();
+        for (const ch of v) {
+          if (/^[0-9]$/.test(ch)) currentHandler()({ key: ch });
+        }
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' || e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          currentHandler()(e);
+        }
+      });
+    }
+
     // Init
     (async function init(){
       await loadTranslations();
       renderProviders();
       // ensure flags reflect current language
       updateLanguage(currentLang);
+      // set up hidden input bridge for Android soft keyboard
+      setupSoftKeyboardBridge();
+      // attach single global keydown handler
+      window.onkeydown = globalKeydown;
       // Check license status and block UI if expired
       try {
         const res = await fetch('/license_status');
