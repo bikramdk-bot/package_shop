@@ -24,7 +24,7 @@
   {% include 'nav_bar.html' %}
   <div class="card">
     <h1>Settings</h1>
-    <div class="muted">Current Expiry: <span class="expiry">{{ expiry }}</span></div>
+    <div class="muted">Current Expiry: <span class="expiry">{{ expiry }}</span>{% if shop_id %}, Shop: {{ shop_id }}{% endif %}{% if cpu_serial %}, CPU: {{ cpu_serial }}{% endif %}</div>
 
     {% if message %}
       <div class="alert {{ 'success' if success else 'error' }}">{{ message }}</div>
