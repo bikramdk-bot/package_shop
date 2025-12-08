@@ -1,3 +1,22 @@
+## Networking Overview
+
+- Wi‑Fi dongle: a dedicated USB Wi‑Fi dongle handles client Wi‑Fi. By default, `wlan0` runs the hotspot (AP) and `wlan1` (the dongle) connects to shop Wi‑Fi.
+- Hotspot as initiator/fallback: the Pi boots with its hotspot up so staff devices can reach the app. The hotspot remains the fallback if client Wi‑Fi is unavailable.
+- Manager modules: client Wi‑Fi and AP control logic lives in `wifi_manager.py` and a lightweight status writer in `scripts/wifi_status_watcher.py`.
+- Behavior: scanning and connecting prefer NetworkManager (`nmcli`) on Linux; AP is paused only when needed (e.g., single interface setups), otherwise scans run concurrently when AP and client use separate interfaces.
+
+Deployment and scaling:
+- Base image: we use a base Raspberry Pi OS image that already contains all system-level setup (NetworkManager, AP config, polkit rules if used, services), so a new device works out of the box.
+- Code updates: operational scaling is done by cloning the base image to new Pis, booting, and pulling the latest app code from Git on the clone. This “clone then git pull” procedure is the current standard.
+
+Related code paths:
+- `wifi_manager.py`: scanning networks, setting credentials, pausing/resuming hotspot, disconnecting client Wi‑Fi, and reporting combined status.
+- `scripts/wifi_status_watcher.py`: writes a small `/home/pi/wifi_status.json` with the current client interface IPv4, updated every few seconds.
+
+Notes:
+- Interfaces are configurable via environment: `PSHOP_AP_IFACE` (default `wlan0`), `PSHOP_CLIENT_IFACE` (default `wlan1`).
+- An optional AP watchdog service name can be set in `shop_info.json` as `ap_watchdog_service`; it will be stopped/started around scans and connects.
+
 ## Staff Wi‑Fi Setup
 
 This app helps staff scan and connect the Pi to shop Wi‑Fi while using the Pi hotspot as a fallback.
