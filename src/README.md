@@ -268,3 +268,222 @@ Troubleshooting:
 - Check Flask: `curl -v http://127.0.0.1:5000/`
 - Check Nginx: `sudo tail -f /var/log/nginx/error.log`
 - If using a self-signed cert, trust it on tablets or click through the warning.
+
+## HTTPS Certificate: 10000-day Self-signed + Auto-renew
+
+If you want your internal HTTPS service (e.g., camera/dashboard) not to stop after 365 days, issue a longer-lived self-signed cert and add a simple renewal mechanism.
+
+Important:
+- Browsers require SAN (Subject Alternative Name); CN alone is ignored.
+- Self-signed certs are not trusted by default; to remove warnings, import the cert into each device's Trusted Root store.
+
+### Reissue a 10000-day cert with SAN
+
+Run on the Raspberry Pi (adjust host/IP):
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo cp -a /etc/nginx/ssl/packetshop.key /etc/nginx/ssl/packetshop.key.bak-$(date +%F_%H%M) 2>/dev/null || true
+sudo cp -a /etc/nginx/ssl/packetshop.crt /etc/nginx/ssl/packetshop.crt.bak-$(date +%F_%H%M) 2>/dev/null || true
+
+sudo openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 10000 \
+    -keyout /etc/nginx/ssl/packetshop.key.new \
+    -out /etc/nginx/ssl/packetshop.crt.new \
+    -subj "/C=DK/ST=Denmark/L=Copenhagen/O=PacketShop/OU=IT/CN=packetshop.local" \
+    -addext "subjectAltName=DNS:packetshop.local,IP:10.0.0.252"
+
+sudo chmod 600 /etc/nginx/ssl/packetshop.key.new
+sudo chmod 644 /etc/nginx/ssl/packetshop.crt.new
+sudo chown root:root /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.crt.new
+sudo mv /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.key
+sudo mv /etc/nginx/ssl/packetshop.crt.new /etc/nginx/ssl/packetshop.crt
+
+sudo nginx -t
+sudo systemctl reload nginx
+
+openssl x509 -in /etc/nginx/ssl/packetshop.crt -noout -enddate -subject -issuer
+```
+
+If your OpenSSL does not support `-addext`, use a config file fallback:
+
+```bash
+cat | sudo tee /etc/nginx/ssl/packetshop_san.cnf >/dev/null <<'EOF'
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+[dn]
+CN = packetshop.local
+[v3_req]
+subjectAltName = DNS:packetshop.local,IP:10.0.0.252
+EOF
+
+sudo openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 10000 \
+    -keyout /etc/nginx/ssl/packetshop.key.new \
+    -out /etc/nginx/ssl/packetshop.crt.new \
+    -subj "/C=DK/ST=Denmark/L=Copenhagen/O=PacketShop/OU=IT/CN=packetshop.local" \
+    -config /etc/nginx/ssl/packetshop_san.cnf
+
+sudo chmod 600 /etc/nginx/ssl/packetshop.key.new
+sudo chmod 644 /etc/nginx/ssl/packetshop.crt.new
+sudo chown root:root /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.crt.new
+sudo mv /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.key
+sudo mv /etc/nginx/ssl/packetshop.crt.new /etc/nginx/ssl/packetshop.crt
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Auto-renewal script (idempotent)
+
+Install a tiny script that renews only when the cert is missing or within 30 days of expiry.
+
+```bash
+sudo bash -lc 'cat >/usr/local/sbin/renew_selfsigned_nginx.sh <<"EOF"
+#!/bin/sh
+set -eu
+
+CERT_KEY=${CERT_KEY:-/etc/nginx/ssl/packetshop.key}
+CERT_CRT=${CERT_CRT:-/etc/nginx/ssl/packetshop.crt}
+CN=${CN:-packetshop.local}
+SANS=${SANS:-DNS:packetshop.local,IP:10.0.0.252}
+DAYS=${DAYS:-10000}
+BITS=${BITS:-2048}
+THRESHOLD_DAYS=${THRESHOLD_DAYS:-30}
+SUBJ=${SUBJ:-/C=DK/ST=Denmark/L=Copenhagen/O=PacketShop/OU=IT/CN=${CN}}
+
+DIR=$(dirname "$CERT_CRT")
+mkdir -p "$DIR"
+
+EXP=$(openssl x509 -in "$CERT_CRT" -noout -enddate 2>/dev/null | cut -d= -f2 || true)
+RENEW=0
+if [ -z "${EXP:-}" ]; then
+    RENEW=1
+else
+    EXP_EPOCH=$(date -d "$EXP" +%s 2>/dev/null || echo "")
+    if [ -z "$EXP_EPOCH" ]; then
+        RENEW=1
+    else
+        NOW_EPOCH=$(date +%s)
+        LEFT=$(( (EXP_EPOCH - NOW_EPOCH) / 86400 ))
+        if [ "$LEFT" -le "$THRESHOLD_DAYS" ]; then RENEW=1; fi
+    fi
+fi
+
+if [ "${1:-}" = "--force" ]; then RENEW=1; fi
+
+if [ "$RENEW" -eq 1 ]; then
+    KEY_TMP="$CERT_KEY.new"
+    CRT_TMP="$CERT_CRT.new"
+
+    if openssl req -x509 -nodes -newkey rsa:$BITS -sha256 -days "$DAYS" \
+            -keyout "$KEY_TMP" -out "$CRT_TMP" -subj "$SUBJ" \
+            -addext "subjectAltName=$SANS" >/dev/null 2>&1; then :
+    else
+        cat > "$DIR/_san.cnf" <<CFG
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+[dn]
+CN = $CN
+[v3_req]
+subjectAltName = $SANS
+CFG
+        openssl req -x509 -nodes -newkey rsa:$BITS -sha256 -days "$DAYS" \
+            -keyout "$KEY_TMP" -out "$CRT_TMP" -subj "$SUBJ" -config "$DIR/_san.cnf"
+    fi
+
+    chmod 600 "$KEY_TMP"; chmod 644 "$CRT_TMP"
+    chown root:root "$KEY_TMP" "$CRT_TMP"
+    mv "$KEY_TMP" "$CERT_KEY"
+    mv "$CRT_TMP" "$CERT_CRT"
+
+    if nginx -t; then systemctl reload nginx; fi
+fi
+
+openssl x509 -in "$CERT_CRT" -noout -enddate -subject -issuer || true
+EOF
+chmod +x /usr/local/sbin/renew_selfsigned_nginx.sh'
+
+# Run once (force) and verify
+sudo /usr/local/sbin/renew_selfsigned_nginx.sh --force
+openssl x509 -in /etc/nginx/ssl/packetshop.crt -noout -enddate -subject
+```
+
+Customize defaults temporarily by setting env vars when invoking:
+
+```bash
+sudo CN=packetshop.local SANS="DNS:packetshop.local,IP:10.0.0.252" \
+    /usr/local/sbin/renew_selfsigned_nginx.sh --force
+```
+
+### Schedule with systemd timer (monthly)
+
+Create a oneshot service and a monthly timer:
+
+```bash
+sudo bash -lc 'cat >/etc/systemd/system/packetshop-cert-renew.service <<EOF
+[Unit]
+Description=Renew Nginx self-signed certificate if needed
+
+[Service]
+Type=oneshot
+Environment=CN=packetshop.local
+Environment=SANS=DNS:packetshop.local,IP:10.0.0.252
+ExecStart=/usr/local/sbin/renew_selfsigned_nginx.sh --renew-if-needed
+EOF'
+
+sudo bash -lc 'cat >/etc/systemd/system/packetshop-cert-renew.timer <<EOF
+[Unit]
+Description=Monthly self-signed cert renewal for Nginx
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+RandomizedDelaySec=2h
+Unit=packetshop-cert-renew.service
+
+[Install]
+WantedBy=timers.target
+EOF'
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now packetshop-cert-renew.timer
+systemctl status packetshop-cert-renew.timer --no-pager
+systemctl list-timers 'packetshop-cert-renew*' --no-pager
+```
+
+### Optional: one-liner from Windows PowerShell
+
+If you prefer to run everything remotely from Windows, use:
+
+```powershell
+ssh ajeet@10.0.0.252 "sudo bash -lc '
+mkdir -p /etc/nginx/ssl;
+cp -a /etc/nginx/ssl/packetshop.key /etc/nginx/ssl/packetshop.key.bak-$(date +%F_%H%M) 2>/dev/null || true;
+cp -a /etc/nginx/ssl/packetshop.crt /etc/nginx/ssl/packetshop.crt.bak-$(date +%F_%H%M) 2>/dev/null || true;
+openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 10000 \
+    -keyout /etc/nginx/ssl/packetshop.key.new \
+    -out /etc/nginx/ssl/packetshop.crt.new \
+    -subj \"/C=DK/ST=Denmark/L=Copenhagen/O=PacketShop/OU=IT/CN=packetshop.local\" \
+    -addext \"subjectAltName=DNS:packetshop.local,IP:10.0.0.252\";
+chmod 600 /etc/nginx/ssl/packetshop.key.new; chmod 644 /etc/nginx/ssl/packetshop.crt.new;
+chown root:root /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.crt.new;
+mv /etc/nginx/ssl/packetshop.key.new /etc/nginx/ssl/packetshop.key;
+mv /etc/nginx/ssl/packetshop.crt.new /etc/nginx/ssl/packetshop.crt;
+nginx -t && systemctl reload nginx;
+openssl x509 -in /etc/nginx/ssl/packetshop.crt -noout -enddate -subject -issuer
+'"
+```
+
+### Verify cert details anytime
+
+```bash
+openssl x509 -in /etc/nginx/ssl/packetshop.crt -noout -enddate -subject -issuer
+```
+
+If you need to change hostnames/IPs later, update the `Environment` lines in the systemd service and re-run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart packetshop-cert-renew.timer
+```
