@@ -175,3 +175,96 @@ python generate_token.py SHOP07 3
 
 - You can edit `shop_info.json` to change the current `shop_id`.
 - If you change `SECRET_SALT` in `license_manager.py`, regenerate tokens accordingly.
+
+## HTTPS via Nginx (Raspberry Pi)
+
+This project can be secured with HTTPS by placing Nginx in front of Flask and terminating TLS on the Pi.
+
+Steps:
+
+1) Install Nginx on Raspberry Pi OS (Debian-based):
+
+```bash
+sudo apt update
+sudo apt install -y nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
+```
+
+2) Generate a self-signed certificate (or install your CA-issued cert):
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+  -keyout /etc/nginx/ssl/packetshop.key \
+  -out /etc/nginx/ssl/packetshop.crt \
+  -subj "/C=DK/ST=Denmark/L=Copenhagen/O=PacketShop/OU=IT/CN=packetshop.local"
+sudo chmod 600 /etc/nginx/ssl/packetshop.key
+```
+
+3) Configure Nginx to reverse proxy HTTPS → Flask (`localhost:5000`). Create `/etc/nginx/sites-available/packetshop`:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/ssl/packetshop.crt;
+    ssl_certificate_key /etc/nginx/ssl/packetshop.key;
+
+    # Recommended SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # Static files (optional)
+    location /static/ {
+        alias /home/pi/package_shop/src/static/;
+        access_log off;
+        expires 7d;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+# Redirect HTTP → HTTPS
+server {
+    listen 80;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+```
+
+Enable the site and reload Nginx:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/packetshop /etc/nginx/sites-enabled/packetshop
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+4) Adjust Flask for reverse proxy:
+
+- Already handled in `api_server.py` via `ProxyFix` and `PREFERRED_URL_SCHEME = 'https'`.
+- Keep Flask listening on `0.0.0.0:5000` (HTTP). Nginx terminates TLS.
+
+5) Connect tablets to `https://<PI-IP>`:
+
+- Staff and customer devices should use the Pi address with HTTPS.
+- Traffic is encrypted; Nginx forwards to Flask securely on localhost.
+
+Troubleshooting:
+- Check Flask: `curl -v http://127.0.0.1:5000/`
+- Check Nginx: `sudo tail -f /var/log/nginx/error.log`
+- If using a self-signed cert, trust it on tablets or click through the warning.

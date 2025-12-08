@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+from werkzeug.middleware.proxy_fix import ProxyFix
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel
 from license_manager import (
     ensure_token_db,
@@ -16,6 +17,8 @@ import subprocess
 import glob
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+app.config["PREFERRED_URL_SCHEME"] = "https"
 
 # Use the exact same DB path as other modules (lookup.py/db_manager.py)
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
