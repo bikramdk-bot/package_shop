@@ -84,6 +84,13 @@
       outline: 2px solid transparent;
       color: #fff; /* ensure text contrast on solid brand fills */
     }
+
+    /* Home button above providers (left-aligned, above PostNord tile) */
+    .home-row { display: flex; justify-content: flex-start; align-items: center; margin: 6px 0 6px; }
+    .home-btn { border: 0; border-radius: 10px; padding: 10px 12px; font-size: 16px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; background: #f3f4f6; color: #111827; box-shadow: var(--shadow); }
+    .home-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+    .home-icon { width: 18px; height: 18px; display: inline-block; }
+    .home-icon svg { width: 18px; height: 18px; display: block; fill: none; stroke: #111827; stroke-width: 2; }
     .provider:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
     .provider.selected { outline: 3px solid var(--primary); }
     .provider.dim { filter: saturate(0.2) brightness(0.85); opacity: 0.6; }
@@ -232,6 +239,18 @@
           <div id="helper" class="helper" style="display:none"></div>
         </div>
 
+        <div class="home-row">
+          <button class="home-btn" onclick="goHome()" aria-label="Home">
+            <span class="home-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                <path d="M3 10.5L12 3l9 7.5"/>
+                <path d="M5 10v10h14V10"/>
+                <path d="M10 20v-6h4v6"/>
+              </svg>
+            </span>
+            <span data-i18n="home">Home</span>
+          </button>
+        </div>
         <div class="providers" id="providers"></div>
       </div>
     </div>
@@ -762,7 +781,8 @@
       // restore all providers to bright again
       document.querySelectorAll('.provider').forEach(el => el.classList.remove('dim'));
       setTimeout(()=>focusActiveBox(), 50);
-      focusSoftKeyboard();
+      // Do not show keyboard until a provider is chosen
+      hideSoftKeyboard();
     }
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
@@ -880,6 +900,8 @@
       if (clearBtn) clearBtn.style.display = 'none';
       const submitBtn = document.getElementById('submitBtn');
       if (submitBtn) submitBtn.style.display = 'none';
+      // Hide keyboard until a provider is chosen in the new session
+      hideSoftKeyboard();
     }
 
     // --- QR Scanner ---
@@ -1007,6 +1029,12 @@
       }
     }
 
+    // Navigate to start/home
+    function goHome() {
+      // Navigate to the customer start flow showing all providers
+      try { window.location.href = '/customer'; } catch { window.location.assign('/customer'); }
+    }
+
     // Bridge the hidden input's events to our current key handler
     function setupSoftKeyboardBridge() {
       const el = document.getElementById('softKeyboardInput');
@@ -1027,6 +1055,12 @@
           currentHandler()(e);
         }
       });
+    }
+
+    // Blur hidden input to hide soft keyboard on mobile
+    function hideSoftKeyboard() {
+      const el = document.getElementById('softKeyboardInput');
+      try { if (el) el.blur(); } catch {}
     }
 
     // Init
