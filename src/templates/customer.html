@@ -73,11 +73,11 @@
       min-height: calc(100vh - 120px);
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      justify-content: flex-start;
     }
 
     /* Providers */
-    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; align-items: stretch; }
+    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 10px; margin-bottom: 12px; align-items: stretch; }
     .provider {
       height: 22vh; border-radius: 18px; background: #f3f4f6; position: relative; overflow: hidden; cursor: pointer;
       display: grid; place-items: center; transition: transform .15s ease, box-shadow .15s ease, outline .15s ease;
@@ -97,8 +97,9 @@
     .p-dhl { background: var(--dhl); }
 
     /* Digit boxes */
-    .input-area { display: grid; gap: 14px; padding: 8px 0 0; }
-    .prompt { font-size: 22px; text-align: center; display: none; }
+    .input-area { display: grid; gap: 10px; padding: 6px 0 0; align-self: center; width: 100%; max-width: 1000px; }
+    .input-row { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; align-items: start; }
+    .prompt { font-size: 20px; text-align: left; color: #374151; display: block; }
     .boxes { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
     .box {
       width: clamp(52px, 8vw, 72px); height: clamp(68px, 10vw, 88px); border-radius: 14px; background: #f8fafc; box-shadow: inset 0 0 0 2px #e5e7eb;
@@ -130,21 +131,21 @@
     .btn-success.breathing { animation: breathing 1.2s ease-in-out infinite; }
     @keyframes breathing { 0%{ transform: translateY(0)} 50%{ transform: translateY(-1px)} 100%{ transform: translateY(0)} }
 
-    .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 6px; }
+    .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 2px; }
     .msg.error { color: var(--danger); }
     .msg.success { color: var(--success); }
 
     /* Overlay for DAO kode and success */
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: flex-start; justify-content: center; }
     .overlay.show { display: flex; }
-    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; }
+    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; margin-top: 2vh; }
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
     /* Invisible input to reliably trigger Android soft keyboard */
     .soft-kb-input {
       position: fixed; /* keep it on-screen so mobile allows keyboard */
-      top: 0; left: 0;
+      bottom: 8px; right: 8px; /* fix near bottom-right to avoid overlays */
       width: 1px; height: 1px;
       opacity: 0; border: 0; padding: 0; margin: 0;
       background: transparent; color: transparent;
@@ -200,11 +201,22 @@
 
     <div class="main">
       <div class="card">
-        <div class="providers" id="providers"></div>
-
         <div class="input-area">
-          <div id="prompt" class="prompt" data-i18n="prompt" style="display:none"></div>
-          <div id="boxes" class="boxes" aria-live="polite"></div>
+          <div class="input-row">
+            <div id="prompt" class="prompt" data-i18n="prompt"></div>
+            <div>
+              <div id="boxes" class="boxes" aria-live="polite" style="margin-bottom: 6px;"></div>
+              <div id="message" class="msg"></div>
+              <div class="actions">
+                <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
+                  <span class="icon" aria-hidden="true">📷</span>
+                  <span data-i18n="scanQr">Scan QR</span>
+                </button>
+                <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
+                <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
+              </div>
+            </div>
+          </div>
           <!-- Hidden-but-focusable input to open Android soft keyboard -->
           <input
             id="softKeyboardInput"
@@ -218,16 +230,9 @@
             aria-hidden="true"
           />
           <div id="helper" class="helper" style="display:none"></div>
-          <div class="actions">
-            <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
-              <span class="icon" aria-hidden="true">📷</span>
-              <span data-i18n="scanQr">Scan QR</span>
-            </button>
-            <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
-            <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
-          </div>
-          <div id="message" class="msg"></div>
         </div>
+
+        <div class="providers" id="providers"></div>
       </div>
     </div>
   </div>
@@ -438,6 +443,23 @@
         b.textContent = inputDigits[i] || '';
         boxes.appendChild(b);
       }
+      // Update prompt text to reflect required digits
+      const promptEl = document.getElementById('prompt');
+      if (promptEl) {
+        let txt = '';
+        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
+          txt = (i18n?.[currentLang]?.promptDao5) || 'DAO: Enter the 5-digit collection code';
+        } else if (selectedProvider === 'Bring') {
+          txt = (i18n?.[currentLang]?.promptBring5) || 'Enter the 5-digit code';
+        } else {
+          if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter the last 4 digits';
+          else if (count === 6) txt = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
+          else if (count === 8) txt = (i18n?.[currentLang]?.promptLast8) || 'Enter the last 8 digits';
+          else if (count === 10) txt = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+        }
+        promptEl.textContent = txt;
+        promptEl.style.display = 'block';
+      }
       // helper hidden per new UX
       // set active handler for physical keyboards
       activeKeyHandler = handleKey;
@@ -525,6 +547,13 @@
       lastLookupCount = results.length || 0;
 
       if (['PostNord','GLS','DAO','UPS','DHL'].includes(selectedProvider)) {
+        // If collecting DAO kode inline, short-circuit to submit when length reached
+        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
+          if (inputDigits.length < 5) { msg.textContent = (i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; msg.className='msg error'; return; }
+          await submitCustomerEntry(inputDigits);
+          window.__awaitingDaoKode = false;
+          return;
+        }
         // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
           if (targetLen === 4) {
@@ -622,8 +651,20 @@
             isQrAuto = false; qrRawCode = null;
             return;
           }
-          // DAO requires kode after we have a match
-          if (selectedProvider === 'DAO') { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
+          // DAO requires 5-digit kode inline after we have a match
+          if (selectedProvider === 'DAO') {
+            isQrAuto = false; qrRawCode = null;
+            // Switch flow to collect 5-digit kode inline
+            targetLen = 5;
+            inputDigits = '';
+            window.__awaitingDaoKode = true;
+            renderInputBoxes(targetLen);
+            // Update helper/message to guide user
+            msg.className = 'msg';
+            msg.textContent = '';
+            focusActiveBox();
+            return;
+          }
           // Otherwise submit entry immediately
           isQrAuto = false; qrRawCode = null;
           await submitCustomerEntry();
@@ -638,8 +679,13 @@
       if (selectedProvider === 'Bring') {
         payload.kode = kode;
       } else {
-        payload.digits = inputDigits;
-        if (kode) payload.kode = kode;
+        // If we are in DAO inline kode collection, send kode instead of digits
+        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
+          payload.kode = kode || inputDigits;
+        } else {
+          payload.digits = inputDigits;
+          if (kode) payload.kode = kode;
+        }
       }
       if (kode) payload.kode = kode;
       const res = await fetch('/customer_entry', {
@@ -655,7 +701,10 @@
       }
 
       if (data.require_kode) {
-        openKodeModal();
+        // Inline DAO flow already handles kode; keep state
+        window.__awaitingDaoKode = true;
+        targetLen = 5;
+        renderInputBoxes(targetLen);
         return;
       }
 
@@ -674,59 +723,8 @@
   document.getElementById('doneOverlay').classList.add('show');
     }
 
-    // --- DAO kode modal ---
-    let kodeDigits = '';
-    function openKodeModal() {
-      kodeDigits='';
-      renderKodeBoxes(5);
-      document.getElementById('kodeOverlay').classList.add('show');
-      activeKeyHandler = handleKodeKey; // redirect key events to kode modal
-      document.getElementById('kodeMsg').textContent = '';
-      // ensure keyboard is up for kode entry
-      focusSoftKeyboard();
-    }
-    function closeKode() {
-      document.getElementById('kodeOverlay').classList.remove('show');
-      activeKeyHandler = handleKey;
-    }
-    function renderKodeBoxes(count) {
-      const wrap = document.getElementById('kodeBoxes');
-      wrap.innerHTML = '';
-      for (let i=0;i<count;i++) {
-        const b = document.createElement('div');
-        b.className = 'box' + (i === kodeDigits.length ? ' active' : '');
-        b.textContent = kodeDigits[i] || '';
-        wrap.appendChild(b);
-      }
-    }
-    function handleKodeKey(e) {
-      const msg = document.getElementById('kodeMsg');
-      msg.className = 'msg';
-      if (e.key === 'Backspace') { kodeDigits = kodeDigits.slice(0,-1); renderKodeBoxes(5); return; }
-      if (e.key === 'Enter') { submitCustomerEntryWithKode(); return; }
-      if (/^[0-9]$/.test(e.key)) {
-        if (kodeDigits.length < 5) {
-          kodeDigits += e.key; renderKodeBoxes(5);
-          // debounce auto-submit when we reach 5 digits
-          if (kodeDigits.length === 5) {
-            // blink modal submit button
-            const kbtn = document.getElementById('kodeSubmitBtn');
-            if (kbtn) {
-              kbtn.classList.remove('blink'); void kbtn.offsetWidth; kbtn.classList.add('blink');
-              setTimeout(()=>kbtn.classList.remove('blink'), AUTO_SUBMIT_DELAY + 50);
-            }
-            if (typeof kodeAutoTimer !== 'undefined' && kodeAutoTimer) clearTimeout(kodeAutoTimer);
-            kodeAutoTimer = setTimeout(() => { kodeAutoTimer = null; submitCustomerEntryWithKode(); }, AUTO_SUBMIT_DELAY);
-          }
-        }
-      }
-    }
-    async function submitCustomerEntryWithKode() {
-      const msg = document.getElementById('kodeMsg');
-      if (kodeDigits.length !== 5) { msg.className='msg error'; msg.textContent = (i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
-      closeKode();
-      await submitCustomerEntry(kodeDigits);
-    }
+    // --- DAO inline kode flow: reuse main input boxes and auto-submit at 5 digits ---
+    function isAwaitingDaoKode() { return selectedProvider === 'DAO' && window.__awaitingDaoKode; }
 
     // --- Success modal actions ---
     function nextParcel() {
