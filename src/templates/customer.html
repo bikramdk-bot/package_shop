@@ -54,7 +54,7 @@
     .flag.active { outline: 3px solid var(--primary); outline-offset: 2px; }
     .flag:focus { outline: 3px solid var(--primary); outline-offset: 2px; }
     .flag img { width: 28px; height: 20px; display: block; }
-    .title { font-weight: 700; letter-spacing: 0.5px; }
+    .title { font-weight: 700; letter-spacing: 0.5px; display:none; }
 
     /* Main content */
     .main {
@@ -64,23 +64,29 @@
       padding: 10px 16px 24px;
     }
     .card {
-      width: min(980px, 92vw);
+      width: 100%;
+      max-width: 1400px;
       background: var(--card);
       border-radius: 20px;
       box-shadow: var(--shadow);
       padding: 24px;
+      min-height: calc(100vh - 120px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     /* Providers */
-    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; align-items: stretch; }
     .provider {
-      height: 90px; border-radius: 14px; background: #f3f4f6; position: relative; overflow: hidden; cursor: pointer;
+      height: 22vh; border-radius: 18px; background: #f3f4f6; position: relative; overflow: hidden; cursor: pointer;
       display: grid; place-items: center; transition: transform .15s ease, box-shadow .15s ease, outline .15s ease;
       outline: 2px solid transparent;
       color: #fff; /* ensure text contrast on solid brand fills */
     }
     .provider:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
     .provider.selected { outline: 3px solid var(--primary); }
+    .provider.dim { filter: saturate(0.2) brightness(0.85); opacity: 0.6; }
     .provider img { max-height: 60%; max-width: 70%; object-fit: contain; }
     .provider .fallback { font-weight: 900; color: #fff; font-size: 24px; letter-spacing: 0.2px; padding: 0; }
     .p-postnord { background: var(--postnord); }
@@ -92,7 +98,7 @@
 
     /* Digit boxes */
     .input-area { display: grid; gap: 14px; padding: 8px 0 0; }
-    .prompt { font-size: 22px; text-align: center; }
+    .prompt { font-size: 22px; text-align: center; display: none; }
     .boxes { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
     .box {
       width: clamp(52px, 8vw, 72px); height: clamp(68px, 10vw, 88px); border-radius: 14px; background: #f8fafc; box-shadow: inset 0 0 0 2px #e5e7eb;
@@ -107,6 +113,22 @@
     .btn-ghost { background: #eef2ff; color: #1f2937; }
     .btn-icon { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 16px; }
     .icon { width: 18px; height: 18px; display: inline-block; }
+    .btn-success {
+      background: rgba(16,185,129,1);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 6px 18px rgba(16,185,129,0.35);
+    }
+    .btn-success .checkmark {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #fff; color: rgba(16,185,129,1);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 900;
+    }
+    .btn-success.breathing { animation: breathing 1.2s ease-in-out infinite; }
+    @keyframes breathing { 0%{ transform: translateY(0)} 50%{ transform: translateY(-1px)} 100%{ transform: translateY(0)} }
 
     .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 6px; }
     .msg.error { color: var(--danger); }
@@ -181,7 +203,7 @@
         <div class="providers" id="providers"></div>
 
         <div class="input-area">
-          <div id="prompt" class="prompt" data-i18n="prompt">Vælg udbyder og indtast cifre</div>
+          <div id="prompt" class="prompt" data-i18n="prompt" style="display:none"></div>
           <div id="boxes" class="boxes" aria-live="polite"></div>
           <!-- Hidden-but-focusable input to open Android soft keyboard -->
           <input
@@ -195,14 +217,14 @@
             autocorrect="off"
             aria-hidden="true"
           />
-          <div id="helper" class="helper"></div>
+          <div id="helper" class="helper" style="display:none"></div>
           <div class="actions">
             <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
               <span class="icon" aria-hidden="true">📷</span>
               <span data-i18n="scanQr">Scan QR</span>
             </button>
-            <button class="btn btn-ghost" onclick="clearInput()" data-i18n="clear">Ryd</button>
-            <button id="submitBtn" class="btn btn-primary" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
+            <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
+            <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
           </div>
           <div id="message" class="msg"></div>
         </div>
@@ -362,10 +384,15 @@
 
     function selectProvider(p) {
       selectedProvider = p.key;
-      document.querySelectorAll('.provider').forEach(el => el.classList.remove('selected'));
+      const tiles = document.querySelectorAll('.provider');
+      tiles.forEach(el => el.classList.remove('selected'));
       // mark selected
       const idx = providersCfg.findIndex(x => x.key === p.key);
-      document.querySelectorAll('.provider')[idx]?.classList.add('selected');
+      tiles[idx]?.classList.add('selected');
+      // dim non-selected
+      tiles.forEach((el, i) => {
+        if (i !== idx) el.classList.add('dim'); else el.classList.remove('dim');
+      });
 
       inputDigits = '';
       document.getElementById('message').textContent = '';
@@ -377,20 +404,16 @@
       const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) qrBtn.style.display = showQr ? '' : 'none';
+      // show action buttons now that a provider is chosen
+      const clearBtn = document.getElementById('clearBtn');
+      if (clearBtn) clearBtn.style.display = '';
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.style.display = '';
       focusActiveBox();
       // Focus invisible input to trigger Android soft keyboard
       focusSoftKeyboard();
       // Set a clearer prompt for UPS/Bring 5-digit code entry
-        if (selectedProvider === 'Bring') {
-        document.getElementById('prompt').textContent = (i18n?.[currentLang]?.daoTitle) || 'Indtast 5-cifret afhentningskode';
-      } else {
-        // Make the prompt explicit about "last 4 digits" when starting with 4
-        if (targetLen === 4) {
-          document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast4) || 'Indtast de sidste 4 cifre';
-        } else {
-          document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptDigits) || 'Indtast cifre';
-        }
-      }
+        // No instructional text needed per new spec
     }
 
     // --- Digit boxes ---
@@ -415,7 +438,7 @@
         b.textContent = inputDigits[i] || '';
         boxes.appendChild(b);
       }
-      document.getElementById('helper').textContent = `${inputDigits.length}/${count}`;
+      // helper hidden per new UX
       // set active handler for physical keyboards
       activeKeyHandler = handleKey;
       // clear any pending auto-submit when re-rendering boxes
@@ -716,6 +739,8 @@
         const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
         qrBtn.style.display = showQr ? '' : 'none';
       }
+      // restore all providers to bright again
+      document.querySelectorAll('.provider').forEach(el => el.classList.remove('dim'));
       setTimeout(()=>focusActiveBox(), 50);
       focusSoftKeyboard();
     }
@@ -782,9 +807,21 @@
           if (yesBtn) yesBtn.style.display = 'none';
           const noBtn = document.getElementById('noBtn');
           if (noBtn) {
-            noBtn.textContent = (i18n?.[currentLang]?.ok) || 'OK';
+            // Style OK button with green checkmark and cool design
+            noBtn.classList.add('btn-success','breathing');
+            noBtn.innerHTML = '<span class="checkmark">✔</span>' + ((i18n?.[currentLang]?.ok) || 'OK');
             noBtn.onclick = finishSession;
           }
+          // Auto-dismiss the message box and return to home after 10 seconds
+          try {
+            setTimeout(() => {
+              // If the overlay is still visible, finish the session
+              const overlay = document.getElementById('doneOverlay');
+              if (overlay && overlay.classList.contains('show')) {
+                finishSession();
+              }
+            }, 10000);
+          } catch {}
         } else {
           throw new Error('bad status');
         }
@@ -802,9 +839,10 @@
       // reset everything
       selectedProvider = null; inputDigits=''; lastLookupCount=0; targetLen=0; sessionId=null; entryIds=[];
       document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('selected'));
+      document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('dim'));
       document.getElementById('boxes').innerHTML='';
       document.getElementById('helper').textContent='';
-      document.getElementById('prompt').textContent = (i18n?.[currentLang]?.prompt) || 'Vælg udbyder og indtast cifre';
+      // keep prompt hidden per new spec
       // Reset modal UI to initial state for next time
       const yesBtn = document.getElementById('yesBtn');
       const noBtn = document.getElementById('noBtn');
@@ -818,6 +856,10 @@
       if (offerEl) { offerEl.remove(); }
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) qrBtn.style.display = 'none';
+      const clearBtn = document.getElementById('clearBtn');
+      if (clearBtn) clearBtn.style.display = 'none';
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.style.display = 'none';
     }
 
     // --- QR Scanner ---
