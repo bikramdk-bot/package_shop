@@ -136,9 +136,9 @@
     .msg.success { color: var(--success); }
 
     /* Overlay for DAO kode and success */
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: flex-start; justify-content: center; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; }
     .overlay.show { display: flex; }
-    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; margin-top: 2vh; }
+    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; margin-top: 4vh; }
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
@@ -447,9 +447,7 @@
       const promptEl = document.getElementById('prompt');
       if (promptEl) {
         let txt = '';
-        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
-          txt = (i18n?.[currentLang]?.promptDao5) || 'DAO: Enter the 5-digit collection code';
-        } else if (selectedProvider === 'Bring') {
+        if (selectedProvider === 'Bring') {
           txt = (i18n?.[currentLang]?.promptBring5) || 'Enter the 5-digit code';
         } else {
           if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter the last 4 digits';
@@ -547,13 +545,6 @@
       lastLookupCount = results.length || 0;
 
       if (['PostNord','GLS','DAO','UPS','DHL'].includes(selectedProvider)) {
-        // If collecting DAO kode inline, short-circuit to submit when length reached
-        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
-          if (inputDigits.length < 5) { msg.textContent = (i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; msg.className='msg error'; return; }
-          await submitCustomerEntry(inputDigits);
-          window.__awaitingDaoKode = false;
-          return;
-        }
         // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
           if (targetLen === 4) {
@@ -651,20 +642,8 @@
             isQrAuto = false; qrRawCode = null;
             return;
           }
-          // DAO requires 5-digit kode inline after we have a match
-          if (selectedProvider === 'DAO') {
-            isQrAuto = false; qrRawCode = null;
-            // Switch flow to collect 5-digit kode inline
-            targetLen = 5;
-            inputDigits = '';
-            window.__awaitingDaoKode = true;
-            renderInputBoxes(targetLen);
-            // Update helper/message to guide user
-            msg.className = 'msg';
-            msg.textContent = '';
-            focusActiveBox();
-            return;
-          }
+          // DAO requires kode after we have a match
+          if (selectedProvider === 'DAO') { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
           // Otherwise submit entry immediately
           isQrAuto = false; qrRawCode = null;
           await submitCustomerEntry();
@@ -679,13 +658,8 @@
       if (selectedProvider === 'Bring') {
         payload.kode = kode;
       } else {
-        // If we are in DAO inline kode collection, send kode instead of digits
-        if (selectedProvider === 'DAO' && window.__awaitingDaoKode) {
-          payload.kode = kode || inputDigits;
-        } else {
-          payload.digits = inputDigits;
-          if (kode) payload.kode = kode;
-        }
+        payload.digits = inputDigits;
+        if (kode) payload.kode = kode;
       }
       if (kode) payload.kode = kode;
       const res = await fetch('/customer_entry', {
@@ -701,10 +675,7 @@
       }
 
       if (data.require_kode) {
-        // Inline DAO flow already handles kode; keep state
-        window.__awaitingDaoKode = true;
-        targetLen = 5;
-        renderInputBoxes(targetLen);
+        openKodeModal();
         return;
       }
 
@@ -723,8 +694,59 @@
   document.getElementById('doneOverlay').classList.add('show');
     }
 
-    // --- DAO inline kode flow: reuse main input boxes and auto-submit at 5 digits ---
-    function isAwaitingDaoKode() { return selectedProvider === 'DAO' && window.__awaitingDaoKode; }
+    // --- DAO kode modal ---
+    let kodeDigits = '';
+    function openKodeModal() {
+      kodeDigits='';
+      renderKodeBoxes(5);
+      document.getElementById('kodeOverlay').classList.add('show');
+      activeKeyHandler = handleKodeKey; // redirect key events to kode modal
+      document.getElementById('kodeMsg').textContent = '';
+      // ensure keyboard is up for kode entry
+      focusSoftKeyboard();
+    }
+    function closeKode() {
+      document.getElementById('kodeOverlay').classList.remove('show');
+      activeKeyHandler = handleKey;
+    }
+    function renderKodeBoxes(count) {
+      const wrap = document.getElementById('kodeBoxes');
+      wrap.innerHTML = '';
+      for (let i=0;i<count;i++) {
+        const b = document.createElement('div');
+        b.className = 'box' + (i === kodeDigits.length ? ' active' : '');
+        b.textContent = kodeDigits[i] || '';
+        wrap.appendChild(b);
+      }
+    }
+    function handleKodeKey(e) {
+      const msg = document.getElementById('kodeMsg');
+      msg.className = 'msg';
+      if (e.key === 'Backspace') { kodeDigits = kodeDigits.slice(0,-1); renderKodeBoxes(5); return; }
+      if (e.key === 'Enter') { submitCustomerEntryWithKode(); return; }
+      if (/^[0-9]$/.test(e.key)) {
+        if (kodeDigits.length < 5) {
+          kodeDigits += e.key; renderKodeBoxes(5);
+          // debounce auto-submit when we reach 5 digits
+          if (kodeDigits.length === 5) {
+            // blink modal submit button
+            const kbtn = document.getElementById('kodeSubmitBtn');
+            if (kbtn) {
+              kbtn.classList.remove('blink'); void kbtn.offsetWidth; kbtn.classList.add('blink');
+              setTimeout(()=>kbtn.classList.remove('blink'), AUTO_SUBMIT_DELAY + 50);
+            }
+            if (typeof kodeAutoTimer !== 'undefined' && kodeAutoTimer) clearTimeout(kodeAutoTimer);
+            kodeAutoTimer = setTimeout(() => { kodeAutoTimer = null; submitCustomerEntryWithKode(); }, AUTO_SUBMIT_DELAY);
+          }
+        }
+      }
+    }
+    async function submitCustomerEntryWithKode() {
+      const msg = document.getElementById('kodeMsg');
+      if (kodeDigits.length !== 5) { msg.className='msg error'; msg.textContent = (i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
+      closeKode();
+      await submitCustomerEntry(kodeDigits);
+    }
 
     // --- Success modal actions ---
     function nextParcel() {
