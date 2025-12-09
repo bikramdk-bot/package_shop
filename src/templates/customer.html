@@ -73,17 +73,24 @@
       min-height: calc(100vh - 120px);
       display: flex;
       flex-direction: column;
-      justify-content: center;
+      justify-content: flex-start;
     }
 
     /* Providers */
-    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 18px; align-items: stretch; }
+    .providers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 10px; margin-bottom: 12px; align-items: stretch; }
     .provider {
       height: 22vh; border-radius: 18px; background: #f3f4f6; position: relative; overflow: hidden; cursor: pointer;
       display: grid; place-items: center; transition: transform .15s ease, box-shadow .15s ease, outline .15s ease;
       outline: 2px solid transparent;
       color: #fff; /* ensure text contrast on solid brand fills */
     }
+
+    /* Home button above providers (left-aligned, above PostNord tile) */
+    .home-row { display: flex; justify-content: flex-start; align-items: center; margin: 6px 0 6px; }
+    .home-btn { border: 0; border-radius: 10px; padding: 10px 12px; font-size: 16px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; background: #f3f4f6; color: #111827; box-shadow: var(--shadow); }
+    .home-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+    .home-icon { width: 18px; height: 18px; display: inline-block; }
+    .home-icon svg { width: 18px; height: 18px; display: block; fill: none; stroke: #111827; stroke-width: 2; }
     .provider:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
     .provider.selected { outline: 3px solid var(--primary); }
     .provider.dim { filter: saturate(0.2) brightness(0.85); opacity: 0.6; }
@@ -97,8 +104,9 @@
     .p-dhl { background: var(--dhl); }
 
     /* Digit boxes */
-    .input-area { display: grid; gap: 14px; padding: 8px 0 0; }
-    .prompt { font-size: 22px; text-align: center; display: none; }
+    .input-area { display: grid; gap: 10px; padding: 6px 0 0; align-self: center; width: 100%; max-width: 1000px; }
+    .input-row { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; align-items: start; }
+    .prompt { font-size: 20px; text-align: left; color: #374151; display: block; }
     .boxes { display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap; }
     .box {
       width: clamp(52px, 8vw, 72px); height: clamp(68px, 10vw, 88px); border-radius: 14px; background: #f8fafc; box-shadow: inset 0 0 0 2px #e5e7eb;
@@ -130,21 +138,21 @@
     .btn-success.breathing { animation: breathing 1.2s ease-in-out infinite; }
     @keyframes breathing { 0%{ transform: translateY(0)} 50%{ transform: translateY(-1px)} 100%{ transform: translateY(0)} }
 
-    .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 6px; }
+    .msg { text-align: center; min-height: 24px; font-size: 16px; margin-top: 2px; }
     .msg.error { color: var(--danger); }
     .msg.success { color: var(--success); }
 
     /* Overlay for DAO kode and success */
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; }
     .overlay.show { display: flex; }
-    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; }
+    .modal { width: min(560px, 96vw); background: white; border-radius: 16px; box-shadow: var(--shadow); padding: 22px; margin-top: 4vh; }
     .modal h3 { margin-top: 0; }
     .modal .boxes { margin: 10px 0 4px; }
 
     /* Invisible input to reliably trigger Android soft keyboard */
     .soft-kb-input {
       position: fixed; /* keep it on-screen so mobile allows keyboard */
-      top: 0; left: 0;
+      bottom: 8px; right: 8px; /* fix near bottom-right to avoid overlays */
       width: 1px; height: 1px;
       opacity: 0; border: 0; padding: 0; margin: 0;
       background: transparent; color: transparent;
@@ -200,11 +208,22 @@
 
     <div class="main">
       <div class="card">
-        <div class="providers" id="providers"></div>
-
         <div class="input-area">
-          <div id="prompt" class="prompt" data-i18n="prompt" style="display:none"></div>
-          <div id="boxes" class="boxes" aria-live="polite"></div>
+          <div class="input-row">
+            <div id="prompt" class="prompt" data-i18n="prompt"></div>
+            <div>
+              <div id="boxes" class="boxes" aria-live="polite" style="margin-bottom: 6px;"></div>
+              <div id="message" class="msg"></div>
+              <div class="actions">
+                <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
+                  <span class="icon" aria-hidden="true">📷</span>
+                  <span data-i18n="scanQr">Scan QR</span>
+                </button>
+                <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
+                <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
+              </div>
+            </div>
+          </div>
           <!-- Hidden-but-focusable input to open Android soft keyboard -->
           <input
             id="softKeyboardInput"
@@ -218,16 +237,21 @@
             aria-hidden="true"
           />
           <div id="helper" class="helper" style="display:none"></div>
-          <div class="actions">
-            <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
-              <span class="icon" aria-hidden="true">📷</span>
-              <span data-i18n="scanQr">Scan QR</span>
-            </button>
-            <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
-            <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
-          </div>
-          <div id="message" class="msg"></div>
         </div>
+
+        <div class="home-row">
+          <button class="home-btn" onclick="goHome()" aria-label="Home">
+            <span class="home-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                <path d="M3 10.5L12 3l9 7.5"/>
+                <path d="M5 10v10h14V10"/>
+                <path d="M10 20v-6h4v6"/>
+              </svg>
+            </span>
+            <span data-i18n="home">Home</span>
+          </button>
+        </div>
+        <div class="providers" id="providers"></div>
       </div>
     </div>
   </div>
@@ -311,8 +335,8 @@
       { key:'PostNord', color:'var(--postnord)', css:'p-postnord', img:'/static/logos/postnord.png', fallback:'PostNord' },
       { key:'DAO',      color:'var(--dao)',      css:'p-dao',      img:'/static/logos/dao.png',      fallback:'DAO' },
       { key:'GLS',      color:'var(--gls)',      css:'p-gls',      img:'/static/logos/gls.png',      fallback:'GLS' },
-      { key:'Bring',    color:'var(--bring)',    css:'p-bring',    img:'/static/logos/bring.png',    fallback:'Bring' },
       { key:'UPS',      color:'var(--ups)',      css:'p-ups',      img:'/static/logos/ups.png',      fallback:'UPS' },
+      { key:'Bring',    color:'var(--bring)',    css:'p-bring',    img:'/static/logos/bring.png',    fallback:'Bring' },
       { key:'DHL',      color:'var(--dhl)',      css:'p-dhl',      img:'/static/logos/dhl.png',      fallback:'DHL' },
     ];
     const providerVisible = { PostNord:true, DAO:true, GLS:true, Bring:true, UPS:true, DHL:true };// configurable per shop
@@ -437,6 +461,21 @@
         b.style.setProperty('--accent', accent || 'var(--primary)');
         b.textContent = inputDigits[i] || '';
         boxes.appendChild(b);
+      }
+      // Update prompt text to reflect required digits
+      const promptEl = document.getElementById('prompt');
+      if (promptEl) {
+        let txt = '';
+        if (selectedProvider === 'Bring') {
+          txt = (i18n?.[currentLang]?.promptBring5) || 'Enter the 5-digit code';
+        } else {
+          if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter the last 4 digits';
+          else if (count === 6) txt = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
+          else if (count === 8) txt = (i18n?.[currentLang]?.promptLast8) || 'Enter the last 8 digits';
+          else if (count === 10) txt = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+        }
+        promptEl.textContent = txt;
+        promptEl.style.display = 'block';
       }
       // helper hidden per new UX
       // set active handler for physical keyboards
@@ -742,7 +781,8 @@
       // restore all providers to bright again
       document.querySelectorAll('.provider').forEach(el => el.classList.remove('dim'));
       setTimeout(()=>focusActiveBox(), 50);
-      focusSoftKeyboard();
+      // Do not show keyboard until a provider is chosen
+      hideSoftKeyboard();
     }
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
@@ -860,6 +900,8 @@
       if (clearBtn) clearBtn.style.display = 'none';
       const submitBtn = document.getElementById('submitBtn');
       if (submitBtn) submitBtn.style.display = 'none';
+      // Hide keyboard until a provider is chosen in the new session
+      hideSoftKeyboard();
     }
 
     // --- QR Scanner ---
@@ -987,6 +1029,12 @@
       }
     }
 
+    // Navigate to start/home
+    function goHome() {
+      // Navigate to the customer start flow showing all providers
+      try { window.location.href = '/customer'; } catch { window.location.assign('/customer'); }
+    }
+
     // Bridge the hidden input's events to our current key handler
     function setupSoftKeyboardBridge() {
       const el = document.getElementById('softKeyboardInput');
@@ -1007,6 +1055,12 @@
           currentHandler()(e);
         }
       });
+    }
+
+    // Blur hidden input to hide soft keyboard on mobile
+    function hideSoftKeyboard() {
+      const el = document.getElementById('softKeyboardInput');
+      try { if (el) el.blur(); } catch {}
     }
 
     // Init
