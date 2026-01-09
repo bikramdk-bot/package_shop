@@ -10,7 +10,6 @@ from license_manager import (
 import sqlite3, os
 from datetime import datetime, timedelta, date
 import threading, time
-from wifi_manager import scan_networks, set_credentials, current_status, pause_ap, resume_ap, disconnect_wifi
 import json
 import socket
 import subprocess
@@ -26,8 +25,6 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 # Default printer device (can be overridden by environment or request)
 PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
 
-# Path for external Wi-Fi status watcher JSON
-WIFI_STATUS_JSON = "/home/pi/wifi_status.json"
 
 # Config path for shop info on Pi
 SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
@@ -176,61 +173,6 @@ def set_scanner():
         return jsonify({"ok": True, "warning": f"Scanner updated but restart failed: {err}"})
     return jsonify({"ok": True, "message": "Scanner updated, restarting system…"})
 
-@app.route("/wifi-status", methods=["GET"])
-def wifi_status_file():
-    """Return Wi‑Fi client info for wlan1: IP and hostname.
-
-    Primary source is the external watcher JSON (if present).
-    Fallback: compute IP from the configured client interface using `ip`.
-    Always include hostname fields when available.
-    """
-    ip_val = None
-    # 1) Prefer watcher JSON if available
-    try:
-        if os.path.exists(WIFI_STATUS_JSON):
-            with open(WIFI_STATUS_JSON, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            ip = data.get("wifi_connected_ip")
-            if isinstance(ip, str) and ip.strip():
-                ip_val = ip.strip()
-    except Exception:
-        # ignore and try fallback
-        pass
-
-    # 2) Fallback: detect client iface and parse its IPv4
-    if not ip_val:
-        try:
-            cfg = read_shop_info()
-            iface = (
-                os.environ.get("PSHOP_CLIENT_IFACE")
-                or (cfg.get("client_iface") if isinstance(cfg, dict) else None)
-                or "wlan1"
-            )
-            out = subprocess.check_output(["ip", "-4", "addr", "show", iface], text=True)
-            for line in out.splitlines():
-                line = line.strip()
-                if line.startswith("inet "):
-                    # Example: inet 192.168.1.23/24 brd ... scope global wlan1
-                    ip_val = line.split()[1].split("/")[0]
-                    break
-        except Exception:
-            pass
-
-    # 3) Hostname information (helpful for mDNS like hostname.local)
-    host = None
-    mdns = None
-    try:
-        host = socket.gethostname() or None
-        if host:
-            mdns = f"{host}.local"
-    except Exception:
-        pass
-
-    return jsonify({
-        "wifi_connected_ip": (ip_val if ip_val else None),
-        "wifi_hostname": host,
-        "wifi_mdns": mdns,
-    })
 
 def _derive_variant_from_barcode(code, n):
     """Mirror 4-digit extraction rules for N in {6,8,10}.
@@ -480,60 +422,7 @@ def start_cleanup_scheduler(interval_hours: int = 24):
     t = threading.Thread(target=loop, daemon=True)
     t.start()
 
-# ---------------------- WIFI API ----------------------
-@app.route("/wifi/status", methods=["GET"])
-def wifi_status():
-    try:
-        return jsonify(current_status())
-    except Exception as e:
-        return jsonify({"ssid": "", "ip": "", "mode": "unknown", "error": str(e)}), 500
 
-
-@app.route("/wifi/scan", methods=["GET"])
-def wifi_scan():
-    nets = scan_networks()
-    ap_cycled = any(isinstance(n.get("_meta"), dict) and n["_meta"].get("ap_cycled") for n in nets)
-    return jsonify({"networks": nets, "ap_cycled": ap_cycled})
-
-
-@app.route("/wifi/configure", methods=["POST"])
-def wifi_configure():
-    data = request.get_json(silent=True) or {}
-    ssid = (data.get("ssid") or "").strip()
-    password = (data.get("password") or "").strip()
-    hidden = bool(data.get("hidden"))
-    if not ssid:
-        return jsonify({"success": False, "message": "Missing SSID"}), 400
-    # Temporarily pause AP to allow connection
-    try:
-        pause_ap()
-    except Exception:
-        pass
-    ok, msg = set_credentials(ssid, password, hidden=hidden)
-    # Resume AP regardless to keep tablet access
-    try:
-        resume_ap()
-    except Exception:
-        pass
-    return jsonify({"success": ok, "message": msg})
-
-
-@app.route("/wifi/pause-ap", methods=["POST"]) 
-def api_pause_ap():
-    ok, msg = pause_ap()
-    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
-
-
-@app.route("/wifi/resume-ap", methods=["POST"]) 
-def api_resume_ap():
-    ok, msg = resume_ap()
-    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
-
-
-@app.route("/wifi/disconnect", methods=["POST"]) 
-def api_disconnect_wifi():
-    ok, msg = disconnect_wifi()
-    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
 
 
 def get_setting(key: str, default: str = None):
