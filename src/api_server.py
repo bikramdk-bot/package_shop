@@ -397,6 +397,12 @@ def run_migrations():
         )
         # Ensure default print_enabled = 1 (true)
         cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('print_enabled', '1')")
+        # Boot-time policy: always reset print mode to ON regardless of previous choice
+        # This ensures printing starts enabled after any restart.
+        try:
+            cur.execute("UPDATE settings SET value='1' WHERE key='print_enabled'")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
     except sqlite3.OperationalError:
         # If locked during startup, ignore; next startup/run can add these.
