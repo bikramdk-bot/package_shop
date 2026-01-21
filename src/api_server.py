@@ -129,20 +129,61 @@ def _build_zpl(lcn: str, digits: str) -> str:
 
 
 def _write_zpl_to_device(zpl: str, printer: str) -> None:
-    """Write ZPL string to the given printer device path.
+    """Send ZPL to a printer destination.
 
-    Raises an exception if the write fails.
+    Supports multiple strategies:
+    - If `printer` is a writable path (e.g., /dev/usb/lp0), write directly.
+    - If `printer` starts with "cups:" (e.g., cups:Zebra_ZD), use `lp -d <queue> -o raw`.
+    - If `printer` looks like a CUPS queue name (no path separators), try `lp -d <queue> -o raw`.
+
+    Raises an exception if all strategies fail.
     """
-    # Ensure parent dir exists for file paths (no-op for device nodes)
-    try:
-        parent = os.path.dirname(printer)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-    except Exception:
-        pass
+    dest = (printer or "").strip()
+    data = zpl.encode("utf-8")
 
-    with open(printer, "wb") as p:
-        p.write(zpl.encode("utf-8"))
+    # 1) Direct device write if path exists and is writable
+    try:
+        if dest and ("/" in dest or dest.startswith(".")) and os.path.exists(dest):
+            # Ensure parent dir exists for file paths (no-op for device nodes)
+            try:
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+            except Exception:
+                pass
+            with open(dest, "wb") as p:
+                p.write(data)
+            return
+    except Exception as e:
+        last_err = e
+    else:
+        last_err = RuntimeError("Unknown print error")
+
+    # 2) cups:<queue> explicit syntax
+    if dest.lower().startswith("cups:"):
+        queue = dest.split(":", 1)[1].strip()
+        if not queue:
+            raise ValueError("Invalid cups destination: missing queue name")
+        try:
+            proc = subprocess.run([
+                "lp", "-d", queue, "-o", "raw"
+            ], input=data, check=True)
+            return
+        except Exception as e:
+            last_err = e
+
+    # 3) Treat bare token (no slashes) as a CUPS queue name
+    if dest and "/" not in dest and "\\" not in dest:
+        try:
+            proc = subprocess.run([
+                "lp", "-d", dest, "-o", "raw"
+            ], input=data, check=True)
+            return
+        except Exception as e:
+            last_err = e
+
+    # If we got here, all strategies failed
+    raise (last_err if last_err else RuntimeError("Failed to print ZPL"))
 
 @app.route("/list-scanners", methods=["GET"])
 def list_scanners():
