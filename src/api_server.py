@@ -22,8 +22,43 @@ app.config["PREFERRED_URL_SCHEME"] = "https"
 # Use the exact same DB path as other modules (lookup.py/db_manager.py)
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 
-# Default printer device (can be overridden by environment or request)
-PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
+def _detect_default_printer_device() -> str:
+    """Return effective printer destination.
+
+    Priority:
+    1) Environment PRINTER_DEVICE
+    2) shop_info.json -> { "printer_device": "..." }
+    3) CUPS default queue via `lpstat -d` → cups:<queue>
+    4) Fallback to /dev/usb/lp0
+    """
+    env = (os.environ.get("PRINTER_DEVICE") or "").strip()
+    if env:
+        return env
+    try:
+        cfg = read_shop_info()
+        val = (cfg.get("printer_device") or "").strip() if isinstance(cfg, dict) else ""
+        if val:
+            return val
+    except Exception:
+        pass
+    # Try CUPS default
+    try:
+        out = subprocess.check_output(["lpstat", "-d"], stderr=subprocess.STDOUT, text=True, timeout=3)
+        # Expected: "system default destination: ZD411\n"
+        for line in out.splitlines():
+            line = line.strip()
+            if line.lower().startswith("system default destination:"):
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    queue = parts[1].strip()
+                    if queue:
+                        return f"cups:{queue}"
+    except Exception:
+        pass
+    return "/dev/usb/lp0"
+
+# Default printer device (used if request doesn't specify one)
+PRINTER_DEVICE = _detect_default_printer_device()
 
 
 # Config path for shop info on Pi

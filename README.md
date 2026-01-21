@@ -27,6 +27,14 @@ Make the API print via CUPS
 	- PRINTER_DEVICE=cups:Zebra_ZD
 	The API will send ZPL via lp -d Zebra_ZD -o raw. If you set PRINTER_DEVICE to a device path (/dev/usb/lp0), it will write directly instead.
 
+Auto-detection and persistent config
+- If `PRINTER_DEVICE` is not set, the API now auto-detects the system default CUPS destination (via `lpstat -d`) and uses it as `cups:<queue>`.
+- To persist a specific device or queue without environment variables, add to `/home/pi/config/shop_info.json`:
+	```json
+	{ "printer_device": "cups:ZD411" }
+	```
+	On startup, the API loads this value.
+
 Scanner configuration
 - The scanner service reads events from a single Linux input device. Set the device via the Staff page or manually:
 	- Staff UI: /staff → Scanner section uses /list-scanners and /set-scanner
