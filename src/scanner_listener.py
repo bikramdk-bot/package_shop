@@ -11,13 +11,44 @@ import re
 
 # --- CONFIG ---
 PRINTER_DEVICE = "/dev/usb/lp0"
-# Load scanner path from Pi config file with safe fallback
+
+# Canonical config now lives alongside this script: src/shop_info.json
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_CFG = os.path.join(APP_DIR, "shop_info.json")
+HOME_CFG = os.path.join(os.path.expanduser("~"), "config", "shop_info.json")
+
+# One-time migration: if ~/config/shop_info.json exists, move (overwrite) to src/shop_info.json
 try:
-    with open("/home/pi/config/shop_info.json", "r", encoding="utf-8") as f:
-        _cfg = json.load(f)
-    SCANNER_PATH = _cfg.get("scanner_path", "/dev/input/by-id/usb-0581_011c-event-kbd")
+    if os.path.exists(HOME_CFG):
+        try:
+            with open(HOME_CFG, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        try:
+            with open(SRC_CFG, "w", encoding="utf-8") as wf:
+                json.dump(data if isinstance(data, dict) else {}, wf, ensure_ascii=False, indent=2)
+            # Attempt to remove the old file to avoid confusion
+            try:
+                os.remove(HOME_CFG)
+            except Exception:
+                pass
+        except Exception:
+            pass
 except Exception:
-    SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
+    pass
+
+# Load scanner path from src/shop_info.json (fallback to default if missing)
+SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
+try:
+    if os.path.exists(SRC_CFG):
+        with open(SRC_CFG, "r", encoding="utf-8") as f:
+            _cfg = json.load(f)
+        val = _cfg.get("scanner_path") if isinstance(_cfg, dict) else None
+        if isinstance(val, str) and val.strip():
+            SCANNER_PATH = val.strip()
+except Exception:
+    pass
 
 # LCN detection: treat purely alphabetic tokens (legacy behavior).
 # Previously the code supported a SPECIAL_LCN_MATCH prefix and an

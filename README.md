@@ -28,17 +28,17 @@ Make the API print via CUPS
 	The API will send ZPL via lp -d Zebra_ZD -o raw. If you set PRINTER_DEVICE to a device path (/dev/usb/lp0), it will write directly instead.
 
 Auto-detection and persistent config
-- If `PRINTER_DEVICE` is not set, the API now auto-detects the system default CUPS destination (via `lpstat -d`) and uses it as `cups:<queue>`.
-- To persist a specific device or queue without environment variables, add to `/home/pi/config/shop_info.json`:
-	```json
-	{ "printer_device": "cups:ZD411" }
-	```
-	On startup, the API loads this value.
-
+- If `PRINTER_DEVICE` is not set, the API auto-detects the system default CUPS destination (via `lpstat -d`) and uses it as `cups:<queue>`.
+Canonical config location is now `src/shop_info.json` (next to the code). On startup, the app will migrate `~/config/shop_info.json` to `src/shop_info.json` by overwriting the file, then remove the old HOME copy.
+To persist settings, edit `src/shop_info.json`:
+	{
+		"printer_device": "cups:ZD411", "scanner_path": "/dev/input/by-id/usb-0581_011c-event-kbd"
+	}
+	- Manual: edit src/shop_info.json with a field scanner_path pointing to /dev/input/by-id/…-event-kbd
 Scanner configuration
 - The scanner service reads events from a single Linux input device. Set the device via the Staff page or manually:
 	- Staff UI: /staff → Scanner section uses /list-scanners and /set-scanner
-	- Manual: write /home/pi/config/shop_info.json with a field scanner_path pointing to /dev/input/by-id/…-event-kbd
+	- Manual: edit src/shop_info.json and set scanner_path to /dev/input/by-id/…-event-kbd
 
 Run the scanner service for testing
 - Activate logging and run in foreground:
@@ -64,26 +64,39 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 
-Create /etc/systemd/system/scanner_listener.service:
+Optional: separate scanner listener service
+If you prefer to run the scanner listener as its own unit, create `/etc/systemd/system/scanner_listener.service` with the usual Python invocation. Otherwise, you can run only the API service; environments that launch the scanner via API don't need a separate unit.
+
+Troubleshooting quick checks
+- Single-unit alternative (API + Scanner in one service)
+If you prefer one service to manage both the API and the scanner listener, use the helper script [src/scripts/run_both.sh](src/scripts/run_both.sh):
+
+Create /etc/systemd/system/package_shop.service:
 
 [Unit]
-Description=Packet Shop Scanner Listener
-After=multi-user.target
+Description=Packet Shop (API + Scanner)
+After=network-online.target
 
 [Service]
-WorkingDirectory=/home/pi/package_shop
+WorkingDirectory=/home/admin/package_shop
+Environment=PRINTER_DEVICE=cups:ZD411
 Environment=PRINT_VIA_API=1
-ExecStart=/usr/bin/python3 /home/pi/package_shop/src/scanner_listener.py
+Environment=DISABLE_EVDEV_GRAB=0
+ExecStart=/usr/bin/bash -lc '/home/admin/package_shop/src/scripts/run_both.sh'
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 
-Enable both:
+Then reload and enable:
 - sudo systemctl daemon-reload
-- sudo systemctl enable --now package_shop.service scanner_listener.service
+- sudo systemctl enable --now package_shop.service
 
-Troubleshooting quick checks
+Notes:
+- If either API or scanner exits, the unit restarts and brings both back up.
+- Set `DISABLE_EVDEV_GRAB=1` if exclusive keyboard grab interferes with desktop usage.
+- You can still keep the two-unit setup for cleaner isolation; choose the model that fits your ops.
+
 - Printer:
 	- lpstat -p -d
 	- echo ZPL | lp -d <queue> -o raw

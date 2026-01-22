@@ -61,43 +61,50 @@ def _detect_default_printer_device() -> str:
 PRINTER_DEVICE = _detect_default_printer_device()
 
 
-# Config path for shop info on Pi
-SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
-SHOP_INFO_DEFAULT_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
+"""Canonical config path"""
+# Canonical config now lives inside the source directory next to this file
+SHOP_INFO_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
 
-def read_shop_info():
-    """Read shop configuration merging defaults and system overrides.
+def _migrate_home_config_to_src():
+    """One-time migration: move ~/config/shop_info.json to src/shop_info.json (overwrite).
 
-    Loads bundled defaults from src/shop_info.json, then overlays values from
-    /home/pi/config/shop_info.json if present. Returns a dict (possibly empty).
+    If HOME config exists, overwrite the src file with its contents and remove the HOME file.
     """
-    data = {}
-    # Load defaults bundled with app
+    home_cfg = os.path.join(os.path.expanduser("~"), "config", "shop_info.json")
     try:
-        if os.path.exists(SHOP_INFO_DEFAULT_PATH):
-            with open(SHOP_INFO_DEFAULT_PATH, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict):
-                data.update(d)
+        if os.path.exists(home_cfg):
+            try:
+                with open(home_cfg, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f2:
+                json.dump(data if isinstance(data, dict) else {}, f2, ensure_ascii=False, indent=2)
+            try:
+                os.remove(home_cfg)
+            except Exception:
+                pass
     except Exception:
         pass
-    # Overlay with system config
+
+def read_shop_info():
+    """Read shop configuration from src/shop_info.json (after HOME→SRC migration)."""
+    _migrate_home_config_to_src()
     try:
         if os.path.exists(SHOP_INFO_PATH):
             with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            if isinstance(d, dict):
-                data.update(d)
+            return d if isinstance(d, dict) else {}
     except Exception:
         pass
-    return data
+    return {}
 
 def write_shop_info(patch: dict):
+    """Write merged shop_info to src/shop_info.json (canonical)."""
     data = read_shop_info()
     if not isinstance(data, dict):
         data = {}
     data.update(patch)
-    os.makedirs(os.path.dirname(SHOP_INFO_PATH), exist_ok=True)
     with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -137,14 +144,27 @@ def get_shop_meta():
     return {"shop_id": shop_id, "cpu_serial": get_cpu_serial()}
 
 def _restart_api_service():
-    # Restart the main systemd unit for this app.
-    # Based on user confirmation, the unit name is package_shop.service.
+    # Backward-compatible single-service restart
     service = "package_shop.service"
     try:
         subprocess.check_output(["sudo", "systemctl", "restart", service], stderr=subprocess.STDOUT, text=True, timeout=10)
         return True, None
     except subprocess.CalledProcessError as e:
         return False, f"systemctl failed: {e.output}"
+    except Exception as e:
+        return False, str(e)
+
+def _restart_related_services():
+    """Restart only the main API service.
+
+    Environments without a separate scanner service don't need more than this.
+    """
+    svc = "package_shop.service"
+    try:
+        subprocess.check_output(["sudo", "systemctl", "restart", svc], stderr=subprocess.STDOUT, text=True, timeout=10)
+        return True, None
+    except subprocess.CalledProcessError as e:
+        return False, f"{svc}: {e.output}"
     except Exception as e:
         return False, str(e)
 
@@ -243,8 +263,8 @@ def set_scanner():
         write_shop_info({"scanner_path": full})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to write config: {e}"}), 500
-    # Restart the api server service
-    ok, err = _restart_api_service()
+    # Restart related services so the new scanner path takes effect
+    ok, err = _restart_related_services()
     if not ok:
         return jsonify({"ok": True, "warning": f"Scanner updated but restart failed: {err}"})
     return jsonify({"ok": True, "message": "Scanner updated, restarting system…"})
