@@ -33,7 +33,8 @@ for name in ('templates', 'static'):
 for name in ('shop_info.json', 'license.json'):
     p = src_dir / name
     if p.exists():
-        datas.append((str(p), name))
+        # Place config files at dist root ('.') so they remain files, not directories
+        datas.append((str(p), '.'))
 
 hiddenimports = collect_submodules('encodings')
 
@@ -89,7 +90,8 @@ scanner_datas = []
 for name in ('shop_info.json',):
     p = src_dir / name
     if p.exists():
-        scanner_datas.append((str(p), name))
+        # Place config file at dist root
+        scanner_datas.append((str(p), '.'))
 
 a2 = Analysis(
     [scanner_entry],
