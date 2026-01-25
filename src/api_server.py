@@ -22,47 +22,89 @@ app.config["PREFERRED_URL_SCHEME"] = "https"
 # Use the exact same DB path as other modules (lookup.py/db_manager.py)
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
 
-# Default printer device (can be overridden by environment or request)
-PRINTER_DEVICE = os.environ.get("PRINTER_DEVICE", "/dev/usb/lp0")
+def _detect_default_printer_device() -> str:
+    """Return effective printer destination.
 
-
-# Config path for shop info on Pi
-SHOP_INFO_PATH = "/home/pi/config/shop_info.json"
-SHOP_INFO_DEFAULT_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
-
-def read_shop_info():
-    """Read shop configuration merging defaults and system overrides.
-
-    Loads bundled defaults from src/shop_info.json, then overlays values from
-    /home/pi/config/shop_info.json if present. Returns a dict (possibly empty).
+    Priority:
+    1) Environment PRINTER_DEVICE
+    2) shop_info.json -> { "printer_device": "..." }
+    3) CUPS default queue via `lpstat -d` → cups:<queue>
+    4) Fallback to /dev/usb/lp0
     """
-    data = {}
-    # Load defaults bundled with app
+    env = (os.environ.get("PRINTER_DEVICE") or "").strip()
+    if env:
+        return env
     try:
-        if os.path.exists(SHOP_INFO_DEFAULT_PATH):
-            with open(SHOP_INFO_DEFAULT_PATH, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict):
-                data.update(d)
+        cfg = read_shop_info()
+        val = (cfg.get("printer_device") or "").strip() if isinstance(cfg, dict) else ""
+        if val:
+            return val
     except Exception:
         pass
-    # Overlay with system config
+    # Try CUPS default
+    try:
+        out = subprocess.check_output(["lpstat", "-d"], stderr=subprocess.STDOUT, text=True, timeout=3)
+        # Expected: "system default destination: ZD411\n"
+        for line in out.splitlines():
+            line = line.strip()
+            if line.lower().startswith("system default destination:"):
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    queue = parts[1].strip()
+                    if queue:
+                        return f"cups:{queue}"
+    except Exception:
+        pass
+    return "/dev/usb/lp0"
+
+# Default printer device (used if request doesn't specify one)
+PRINTER_DEVICE = _detect_default_printer_device()
+
+
+"""Canonical config path"""
+# Canonical config now lives inside the source directory next to this file
+SHOP_INFO_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
+
+def _migrate_home_config_to_src():
+    """One-time migration: move ~/config/shop_info.json to src/shop_info.json (overwrite).
+
+    If HOME config exists, overwrite the src file with its contents and remove the HOME file.
+    """
+    home_cfg = os.path.join(os.path.expanduser("~"), "config", "shop_info.json")
+    try:
+        if os.path.exists(home_cfg):
+            try:
+                with open(home_cfg, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+            with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f2:
+                json.dump(data if isinstance(data, dict) else {}, f2, ensure_ascii=False, indent=2)
+            try:
+                os.remove(home_cfg)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def read_shop_info():
+    """Read shop configuration from src/shop_info.json (after HOME→SRC migration)."""
+    _migrate_home_config_to_src()
     try:
         if os.path.exists(SHOP_INFO_PATH):
             with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            if isinstance(d, dict):
-                data.update(d)
+            return d if isinstance(d, dict) else {}
     except Exception:
         pass
-    return data
+    return {}
 
 def write_shop_info(patch: dict):
+    """Write merged shop_info to src/shop_info.json (canonical)."""
     data = read_shop_info()
     if not isinstance(data, dict):
         data = {}
     data.update(patch)
-    os.makedirs(os.path.dirname(SHOP_INFO_PATH), exist_ok=True)
     with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -102,14 +144,27 @@ def get_shop_meta():
     return {"shop_id": shop_id, "cpu_serial": get_cpu_serial()}
 
 def _restart_api_service():
-    # Restart the main systemd unit for this app.
-    # Based on user confirmation, the unit name is package_shop.service.
+    # Backward-compatible single-service restart
     service = "package_shop.service"
     try:
         subprocess.check_output(["sudo", "systemctl", "restart", service], stderr=subprocess.STDOUT, text=True, timeout=10)
         return True, None
     except subprocess.CalledProcessError as e:
         return False, f"systemctl failed: {e.output}"
+    except Exception as e:
+        return False, str(e)
+
+def _restart_related_services():
+    """Restart only the main API service.
+
+    Environments without a separate scanner service don't need more than this.
+    """
+    svc = "package_shop.service"
+    try:
+        subprocess.check_output(["sudo", "systemctl", "restart", svc], stderr=subprocess.STDOUT, text=True, timeout=10)
+        return True, None
+    except subprocess.CalledProcessError as e:
+        return False, f"{svc}: {e.output}"
     except Exception as e:
         return False, str(e)
 
@@ -129,20 +184,61 @@ def _build_zpl(lcn: str, digits: str) -> str:
 
 
 def _write_zpl_to_device(zpl: str, printer: str) -> None:
-    """Write ZPL string to the given printer device path.
+    """Send ZPL to a printer destination.
 
-    Raises an exception if the write fails.
+    Supports multiple strategies:
+    - If `printer` is a writable path (e.g., /dev/usb/lp0), write directly.
+    - If `printer` starts with "cups:" (e.g., cups:Zebra_ZD), use `lp -d <queue> -o raw`.
+    - If `printer` looks like a CUPS queue name (no path separators), try `lp -d <queue> -o raw`.
+
+    Raises an exception if all strategies fail.
     """
-    # Ensure parent dir exists for file paths (no-op for device nodes)
-    try:
-        parent = os.path.dirname(printer)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-    except Exception:
-        pass
+    dest = (printer or "").strip()
+    data = zpl.encode("utf-8")
 
-    with open(printer, "wb") as p:
-        p.write(zpl.encode("utf-8"))
+    # 1) Direct device write if path exists and is writable
+    try:
+        if dest and ("/" in dest or dest.startswith(".")) and os.path.exists(dest):
+            # Ensure parent dir exists for file paths (no-op for device nodes)
+            try:
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+            except Exception:
+                pass
+            with open(dest, "wb") as p:
+                p.write(data)
+            return
+    except Exception as e:
+        last_err = e
+    else:
+        last_err = RuntimeError("Unknown print error")
+
+    # 2) cups:<queue> explicit syntax
+    if dest.lower().startswith("cups:"):
+        queue = dest.split(":", 1)[1].strip()
+        if not queue:
+            raise ValueError("Invalid cups destination: missing queue name")
+        try:
+            proc = subprocess.run([
+                "lp", "-d", queue, "-o", "raw"
+            ], input=data, check=True)
+            return
+        except Exception as e:
+            last_err = e
+
+    # 3) Treat bare token (no slashes) as a CUPS queue name
+    if dest and "/" not in dest and "\\" not in dest:
+        try:
+            proc = subprocess.run([
+                "lp", "-d", dest, "-o", "raw"
+            ], input=data, check=True)
+            return
+        except Exception as e:
+            last_err = e
+
+    # If we got here, all strategies failed
+    raise (last_err if last_err else RuntimeError("Failed to print ZPL"))
 
 @app.route("/list-scanners", methods=["GET"])
 def list_scanners():
@@ -167,8 +263,8 @@ def set_scanner():
         write_shop_info({"scanner_path": full})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to write config: {e}"}), 500
-    # Restart the api server service
-    ok, err = _restart_api_service()
+    # Restart related services so the new scanner path takes effect
+    ok, err = _restart_related_services()
     if not ok:
         return jsonify({"ok": True, "warning": f"Scanner updated but restart failed: {err}"})
     return jsonify({"ok": True, "message": "Scanner updated, restarting system…"})

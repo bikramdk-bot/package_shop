@@ -110,14 +110,14 @@ python generate_token.py SHOP07 3
 ## Implementation details
 
 - Paths are relative to the directory of the scripts (`src/`)
-- JSON files: `shop_info.json` for shop ID, `license.json` for expiry
+- JSON files: `shop_info.json` for shop ID and runtime settings, `license.json` for expiry
 - Date format: `YYYY-MM-DD`
 - Month extension uses 30-day months; extension is from the later of today or the current expiry
 - Flask returns HTML by default; `/activate` also supports JSON requests
 
 ## Notes
 
-- You can edit `shop_info.json` to change the current `shop_id`.
+- You can edit `shop_info.json` to change the current `shop_id`, `scanner_path`, or `printer_device`.
 - If you change `SECRET_SALT` in `license_manager.py`, regenerate tokens accordingly.
 
 ## HTTPS via Nginx (Raspberry Pi)

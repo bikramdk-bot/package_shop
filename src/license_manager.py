@@ -43,6 +43,16 @@ TOKEN_DB_INIT_SQL = BASE_DIR / "token_db_init.sql"
 SHOP_INFO_PATH = BASE_DIR / "shop_info.json"
 LICENSE_PATH = BASE_DIR / "license.json"
 
+# Normalize LICENSE_PATH in case a directory named "license.json" exists.
+# This can happen due to previous packaging or deployment mistakes on some systems.
+try:
+    if LICENSE_PATH.exists() and LICENSE_PATH.is_dir():
+        print("[License] WARNING: 'license.json' is a directory; using file inside that directory.")
+        LICENSE_PATH = LICENSE_PATH / "license.json"
+except Exception:
+    # If any error occurs while checking, keep original path and let downstream handle gracefully.
+    pass
+
 DATE_FMT = "%Y-%m-%d"
 
 @dataclass

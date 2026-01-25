@@ -20,20 +20,27 @@ if src_dir is None:
     # Fallback to BASE/src even if file check fails
     src_dir = BASE / 'src'
 
-# Entry script
-entry_script = str(src_dir / 'api_server.py')
+# Entry scripts
+api_entry = str(src_dir / 'api_server.py')
+scanner_entry = str(src_dir / 'scanner_listener.py')
 
-# Include templates and static directories (pick from detected src_dir)
+# Include templates/static and config files so dist/ is self-contained
 datas = []
 for name in ('templates', 'static'):
     p = src_dir / name
     if p.exists():
         datas.append((str(p), name))
+for name in ('shop_info.json', 'license.json'):
+    p = src_dir / name
+    if p.exists():
+        # Place config files at dist root ('.') so they remain files, not directories
+        datas.append((str(p), '.'))
 
 hiddenimports = collect_submodules('encodings')
 
+# ---------------- API SERVER BUILD ----------------
 a = Analysis(
-    [entry_script],
+    [api_entry],
     pathex=[str(src_dir), str(BASE)],
     binaries=[],
     datas=datas,
@@ -74,4 +81,58 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name='api_server'
+)
+
+# ---------------- SCANNER LISTENER BUILD ----------------
+
+# Minimal datas for scanner (reuse config files); templates/static not required
+scanner_datas = []
+for name in ('shop_info.json',):
+    p = src_dir / name
+    if p.exists():
+        # Place config file at dist root
+        scanner_datas.append((str(p), '.'))
+
+a2 = Analysis(
+    [scanner_entry],
+    pathex=[str(src_dir), str(BASE)],
+    binaries=[],
+    datas=scanner_datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+pyz2 = PYZ(a2.pure, a2.zipped_data, cipher=block_cipher)
+
+exe2 = EXE(
+    pyz2,
+    a2.scripts,
+    [],
+    exclude_binaries=True,
+    name='scanner_listener',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+
+coll2 = COLLECT(
+    exe2,
+    a2.binaries,
+    a2.zipfiles,
+    a2.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='scanner_listener'
 )
