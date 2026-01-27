@@ -14,13 +14,17 @@ import json
 import socket
 import subprocess
 import glob
+from paths import resolve_data, init_dirs_and_migrate
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 app.config["PREFERRED_URL_SCHEME"] = "https"
 
-# Use the exact same DB path as other modules (lookup.py/db_manager.py)
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
+# Initialize external directories and migrate legacy files
+init_dirs_and_migrate()
+
+# Use external data directory for DB storage
+DB_PATH = str(resolve_data("packets.db"))
 
 def _detect_default_printer_device() -> str:
     """Return effective printer destination.
@@ -62,34 +66,13 @@ PRINTER_DEVICE = _detect_default_printer_device()
 
 
 """Canonical config path"""
-# Canonical config now lives inside the source directory next to this file
-SHOP_INFO_PATH = os.path.join(os.path.dirname(__file__), "shop_info.json")
+# Canonical config now lives in the external data directory
+SHOP_INFO_PATH = str(resolve_data("shop_info.json"))
 
-def _migrate_home_config_to_src():
-    """One-time migration: move ~/config/shop_info.json to src/shop_info.json (overwrite).
-
-    If HOME config exists, overwrite the src file with its contents and remove the HOME file.
-    """
-    home_cfg = os.path.join(os.path.expanduser("~"), "config", "shop_info.json")
-    try:
-        if os.path.exists(home_cfg):
-            try:
-                with open(home_cfg, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
-            with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f2:
-                json.dump(data if isinstance(data, dict) else {}, f2, ensure_ascii=False, indent=2)
-            try:
-                os.remove(home_cfg)
-            except Exception:
-                pass
-    except Exception:
-        pass
+# Legacy home→src migration removed; centralized in paths.init_dirs_and_migrate()
 
 def read_shop_info():
-    """Read shop configuration from src/shop_info.json (after HOME→SRC migration)."""
-    _migrate_home_config_to_src()
+    """Read shop configuration from shop_info.json in the external data directory."""
     try:
         if os.path.exists(SHOP_INFO_PATH):
             with open(SHOP_INFO_PATH, "r", encoding="utf-8") as f:

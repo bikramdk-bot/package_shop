@@ -36,12 +36,16 @@ if SECRET_SALT == "SALT1234":
 # and will detect the device serial from /proc/cpuinfo. Tokens are Pi-only.
 DEVICE_CPU_ID = os.environ.get("PACKAGE_SHOP_CPU_ID") or None
 
-# Base directory (src/)
-BASE_DIR = Path(__file__).resolve().parent
-TOKEN_DB_PATH = BASE_DIR / "token_db.sqlite"
-TOKEN_DB_INIT_SQL = BASE_DIR / "token_db_init.sql"
-SHOP_INFO_PATH = BASE_DIR / "shop_info.json"
-LICENSE_PATH = BASE_DIR / "license.json"
+from paths import resolve_data, init_dirs_and_migrate
+
+# Initialize external dirs & migrate legacy files
+init_dirs_and_migrate()
+
+# Externalized storage
+TOKEN_DB_PATH = resolve_data("token_db.sqlite")
+TOKEN_DB_INIT_SQL = Path(__file__).resolve().parent / "token_db_init.sql"
+SHOP_INFO_PATH = resolve_data("shop_info.json")
+LICENSE_PATH = resolve_data("license.json")
 
 # Normalize LICENSE_PATH in case a directory named "license.json" exists.
 # This can happen due to previous packaging or deployment mistakes on some systems.

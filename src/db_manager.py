@@ -1,6 +1,8 @@
 import sqlite3, os
+from paths import resolve_data, init_dirs_and_migrate
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
+init_dirs_and_migrate()
+DB_PATH = str(resolve_data("packets.db"))
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
