@@ -1,0 +1,63 @@
+Folders and Key Paths for Fresh Raspberry Pi OS Setup
+========================================================
+
+Main application data/config/log/run:
+-------------------------------------
+- /var/lib/package-shop
+- /etc/package-shop
+- /var/log/package-shop
+- /run/package-shop
+
+Database and persistent files (created in /var/lib/package-shop):
+-----------------------------------------------------------------
+- /var/lib/package-shop/packets.db
+- /var/lib/package-shop/token_db.sqlite
+- /var/lib/package-shop/shop_info.json
+- /var/lib/package-shop/license.json
+
+Nginx/SSL (if using HTTPS):
+---------------------------
+- /etc/nginx/ssl
+
+Nginx config (if using reverse proxy):
+--------------------------------------
+- /etc/nginx/sites-available
+- /etc/nginx/sites-enabled
+
+Systemd (for service/timer):
+----------------------------
+- /etc/systemd/system
+
+Static files for web server (if served from home):
+--------------------------------------------------
+- /home/pi/package_shop/src/static/
+  - /home/pi/package_shop/src/static/flags/
+  - /home/pi/package_shop/src/static/logos/
+- /home/pi/package_shop/src/static/translations.json
+- /home/pi/package_shop/src/static/style.css
+
+Templates (if served from home):
+--------------------------------
+- /home/pi/package_shop/src/templates/
+
+Other referenced folders:
+-------------------------
+- /usr/local/sbin (for custom scripts, e.g., renew_selfsigned_nginx.sh)
+
+Summary Table:
+--------------
+| Path                                 | Purpose                        |
+|---------------------------------------|--------------------------------|
+| /var/lib/package-shop                 | App data/db/json files         |
+| /etc/package-shop                     | App config                     |
+| /var/log/package-shop                 | App logs                       |
+| /run/package-shop                     | Runtime files                  |
+| /etc/nginx/ssl                        | SSL certs/keys                 |
+| /etc/nginx/sites-available            | Nginx config                   |
+| /etc/nginx/sites-enabled              | Nginx config                   |
+| /etc/systemd/system                   | Systemd service/timer          |
+| /usr/local/sbin                       | Custom scripts                 |
+| /home/pi/package_shop/src/static      | Web static files               |
+| /home/pi/package_shop/src/static/flags| Flag images                    |
+| /home/pi/package_shop/src/static/logos| Logo images                    |
+| /home/pi/package_shop/src/templates   | HTML templates                 |
