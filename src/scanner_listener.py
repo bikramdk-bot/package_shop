@@ -8,41 +8,19 @@ import json
 import urllib.request
 import urllib.error
 import re
+from paths import resolve_data, init_dirs_and_migrate
 
 # --- CONFIG ---
 PRINTER_DEVICE = "/dev/usb/lp0"
 
-# Canonical config now lives alongside this script: src/shop_info.json
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_CFG = os.path.join(APP_DIR, "shop_info.json")
-HOME_CFG = os.path.join(os.path.expanduser("~"), "config", "shop_info.json")
+init_dirs_and_migrate()
+CONFIG_PATH = str(resolve_data("shop_info.json"))
 
-# One-time migration: if ~/config/shop_info.json exists, move (overwrite) to src/shop_info.json
-try:
-    if os.path.exists(HOME_CFG):
-        try:
-            with open(HOME_CFG, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-        try:
-            with open(SRC_CFG, "w", encoding="utf-8") as wf:
-                json.dump(data if isinstance(data, dict) else {}, wf, ensure_ascii=False, indent=2)
-            # Attempt to remove the old file to avoid confusion
-            try:
-                os.remove(HOME_CFG)
-            except Exception:
-                pass
-        except Exception:
-            pass
-except Exception:
-    pass
-
-# Load scanner path from src/shop_info.json (fallback to default if missing)
+# Load scanner path from data/shop_info.json (fallback to default if missing)
 SCANNER_PATH = "/dev/input/by-id/usb-0581_011c-event-kbd"
 try:
-    if os.path.exists(SRC_CFG):
-        with open(SRC_CFG, "r", encoding="utf-8") as f:
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             _cfg = json.load(f)
         val = _cfg.get("scanner_path") if isinstance(_cfg, dict) else None
         if isinstance(val, str) and val.strip():

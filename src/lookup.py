@@ -1,8 +1,10 @@
 import sqlite3, os 
 from datetime import datetime
+from paths import resolve_data, init_dirs_and_migrate
 
-# ✅ Same DB used by dashboard
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "packets.db")
+# ✅ Same DB used by dashboard (externalized)
+init_dirs_and_migrate()
+DB_PATH = str(resolve_data("packets.db"))
 
 
 # ---------------------- INIT ----------------------
