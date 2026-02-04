@@ -1,0 +1,26 @@
+[Unit]
+Description=Initialize RTC device (bind I2C) and set system time from hardware clock
+After=local-fs.target systemd-modules-load.service
+Wants=systemd-modules-load.service
+Before=time-sync.target
+
+[Service]
+Type=oneshot
+# Default I2C address for DS1307/DS3231 modules
+Environment=RTC_ADDR=0x68
+
+# 1) Ensure required kernel modules and I2C bus driver are available
+ExecStart=/bin/sh -lc 'modprobe i2c-bcm2835 || true; modprobe i2c-dev || true; modprobe rtc-ds1307 || modprobe rtc-ds3231 || true'
+
+# 2) If no rtc0 is present (no overlay), bind the device on i2c-1
+# Try DS1307, then DS3231
+ExecStart=/bin/sh -lc '[ -e /sys/class/rtc/rtc0 ] || ( echo ds1307 ${RTC_ADDR} > /sys/class/i2c-adapter/i2c-1/new_device ) || true'
+ExecStart=/bin/sh -lc '[ -e /sys/class/rtc/rtc0 ] || ( echo ds3231 ${RTC_ADDR} > /sys/class/i2c-adapter/i2c-1/new_device ) || true'
+
+# 3) Set system time from hardware clock (if present)
+ExecStart=/bin/sh -lc 'hwclock -s || true'
+
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

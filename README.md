@@ -67,36 +67,6 @@ WantedBy=multi-user.target
 Optional: separate scanner listener service
 If you prefer to run the scanner listener as its own unit, create `/etc/systemd/system/scanner_listener.service` with the usual Python invocation. Otherwise, you can run only the API service; environments that launch the scanner via API don't need a separate unit.
 
-Troubleshooting quick checks
-- Single-unit alternative (API + Scanner in one service)
-If you prefer one service to manage both the API and the scanner listener, use the helper script [src/scripts/run_both.sh](src/scripts/run_both.sh):
-
-Create /etc/systemd/system/package_shop.service:
-
-[Unit]
-Description=Packet Shop (API + Scanner)
-After=network-online.target
-
-[Service]
-WorkingDirectory=/home/admin/package_shop
-Environment=PRINTER_DEVICE=cups:ZD411
-Environment=PRINT_VIA_API=1
-Environment=DISABLE_EVDEV_GRAB=0
-ExecStart=/usr/bin/bash -lc '/home/admin/package_shop/src/scripts/run_both.sh'
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-
-Then reload and enable:
-- sudo systemctl daemon-reload
-- sudo systemctl enable --now package_shop.service
-
-Notes:
-- If either API or scanner exits, the unit restarts and brings both back up.
-- Set `DISABLE_EVDEV_GRAB=1` if exclusive keyboard grab interferes with desktop usage.
-- You can still keep the two-unit setup for cleaner isolation; choose the model that fits your ops.
-
 - Printer:
 	- lpstat -p -d
 	- echo ZPL | lp -d <queue> -o raw
@@ -225,57 +195,172 @@ AP Compatibility & Fallbacks
 - If AP remains unsupported on current hardware/software:
   - Keep the pure offline design by introducing a dedicated AP device (external router/AP) configured without WAN/NAT and with DHCP pointing devices to the Pi host, or swap to a known AP-capable USB dongle.
 
-Nginx TLS (Self‑Signed until ~2055)
------------------------------------
+RTC Hardware Clock (RTC) on Raspberry Pi
+---------------------------------------
 
-Goal: run Nginx as a reverse proxy on HTTPS (443) with a self‑signed certificate valid until around year 2055, proxying to the Flask API on port 5000.
+This guide shows how to enable an I2C hardware RTC (DS1307/DS3231) using a systemd unit — no overlay edits or repo scripts required.
 
-Files:
-- scripts/nginx.conf — TLS reverse proxy config targeting 127.0.0.1:5000
-- scripts/generate_self_signed_cert.sh — OpenSSL (Linux/macOS) cert generator
-- scripts/generate_self_signed_cert.ps1 — OpenSSL (Windows) cert generator
-- scripts/run_nginx_linux.sh — starts Nginx with our config
-- scripts/run_nginx_windows.bat — starts Nginx with our config
+Steps (run on the Pi):
 
-Generate the certificate
-
-Linux/macOS:
+1) Enable I2C bus
 
 ```bash
-chmod +x scripts/generate_self_signed_cert.sh
-./scripts/generate_self_signed_cert.sh
+sudo raspi-config nonint do_i2c 0
+# If needed, append dtparam and reboot:
+if [ -f /boot/config.txt ]; then sudo grep -q '^dtparam=i2c_arm=on' /boot/config.txt || echo 'dtparam=i2c_arm=on' | sudo tee -a /boot/config.txt; fi
+if [ -f /boot/firmware/config.txt ]; then sudo grep -q '^dtparam=i2c_arm=on' /boot/firmware/config.txt || echo 'dtparam=i2c_arm=on' | sudo tee -a /boot/firmware/config.txt; fi
+sudo reboot
 ```
 
-Windows (PowerShell):
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\u200bscripts\generate_self_signed_cert.ps1
-```
-
-This creates db/certs/server.key and db/certs/server.crt with SAN=localhost and IP=127.0.0.1 and ~10650 days validity.
-
-Start Nginx
-
-Linux:
+2) Create and start the RTC init unit (bind device and set time)
 
 ```bash
-chmod +x scripts/run_nginx_linux.sh
-./scripts/run_nginx_linux.sh
+sudo tee /etc/systemd/system/rtc-init.service > /dev/null <<'EOF'
+[Unit]
+Description=Initialize RTC device (bind I2C) and set system time from hardware clock
+After=local-fs.target systemd-modules-load.service
+Wants=systemd-modules-load.service
+Before=time-sync.target
+
+[Service]
+Type=oneshot
+Environment=RTC_ADDR=0x68
+
+ExecStart=/bin/sh -lc 'modprobe i2c-bcm2835 || true; modprobe i2c-dev || true; modprobe rtc-ds1307 || modprobe rtc-ds3231 || true'
+ExecStart=/bin/sh -lc '[ -e /sys/class/rtc/rtc0 ] || ( echo ds1307 ${RTC_ADDR} > /sys/bus/i2c/devices/i2c-1/new_device ) || true'
+ExecStart=/bin/sh -lc '[ -e /sys/class/rtc/rtc0 ] || ( echo ds3231 ${RTC_ADDR} > /sys/bus/i2c/devices/i2c-1/new_device ) || true'
+ExecStart=/bin/sh -lc '/usr/local/sbin/hwclock -s || /usr/sbin/hwclock -s || /sbin/hwclock -s || true'
+
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl start rtc-init.service
+sudo systemctl enable rtc-init.service
 ```
 
-Windows:
+3) Verify
 
-1) Install Nginx (download from nginx.org or via a package manager).
-2) Edit scripts/run_nginx_windows.bat and set NGINX_HOME if auto‑detection fails.
-3) Double‑click scripts/run_nginx_windows.bat or run from cmd.
+```bash
+ls -l /sys/class/rtc
+sudo i2cdetect -y 1
+sudo hwclock -r || /usr/local/sbin/hwclock -r
+```
 
-Access:
-- Browser: https://localhost/ → proxies to Flask API.
-- Self‑signed warning is expected; optionally trust the cert in your OS.
+Optional: write system time to RTC on shutdown
+
+```bash
+sudo tee /etc/systemd/system/rtc-save.service > /dev/null <<'EOF'
+[Unit]
+Description=Save system time to RTC at shutdown
+DefaultDependencies=no
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/bin/sh -lc '/usr/local/sbin/hwclock -w || /usr/sbin/hwclock -w || /sbin/hwclock -w || true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable rtc-save.service
+```
+
 
 Notes:
-- The API already sets ProxyFix and prefers HTTPS scheme; Nginx forwards standard headers.
-- If you serve static assets via Nginx, uncomment the /static/ location in scripts/nginx.conf.
-- On Linux, binding to 443 requires root; the run script uses daemon off for foreground logs.
+- If your wiring uses a different I2C bus or address, replace `i2c-1` and/or set `RTC_ADDR=0x69` in the unit, then restart it.
+- With a real RTC present, you can safely disable `fake-hwclock` to avoid time drift:
+	- `sudo systemctl stop fake-hwclock.service && sudo systemctl mask fake-hwclock.service && sudo apt remove -y fake-hwclock`
+
+24/7 Mode Checklist (Offline)
+-----------------------------
+
+Hardening steps to keep the system reliable without internet.
+
+1) Disable Wi‑Fi power saving (both wlan0 and wlan1)
+
+```bash
+# Global NetworkManager default (disable powersave on all connections)
+sudo mkdir -p /etc/NetworkManager/conf.d
+sudo tee /etc/NetworkManager/conf.d/wifi-powersave.conf > /dev/null <<'EOF'
+[connection]
+wifi.powersave = 2
+EOF
+
+# Dispatcher guard to force power_save off whenever links change
+sudo mkdir -p /etc/NetworkManager/dispatcher.d
+sudo tee /etc/NetworkManager/dispatcher.d/99-wifi-powersave-off > /dev/null <<'EOF'
+#!/bin/sh
+IFACE="$1"; ACTION="$2"
+case "$ACTION" in
+	up|dhcp4-change|dhcp6-change|connectivity-change)
+		command -v iw >/dev/null 2>&1 || exit 0
+		iw dev "$IFACE" set power_save off 2>/dev/null || true
+		;;
+esac
+EOF
+sudo chmod +x /etc/NetworkManager/dispatcher.d/99-wifi-powersave-off
+
+# Apply now (no reboot needed)
+sudo systemctl reload NetworkManager || true
+sudo iw dev wlan0 set power_save off 2>/dev/null || true
+sudo iw dev wlan1 set power_save off 2>/dev/null || true
+
+# Verify
+iw dev | sed -n '/Interface \(wlan0\|wlan1\)/,/^$/p' | grep -i 'power save' || true
+```
+
+2) Disable USB autosuspend (keep scanners/printers awake)
+
+```bash
+# Persistent: add kernel parameter (Bookworm uses /boot/firmware/cmdline.txt)
+TARGET=/boot/firmware/cmdline.txt; [ -f /boot/cmdline.txt ] && TARGET=/boot/cmdline.txt
+PARAM=usbcore.autosuspend=-1
+grep -q "$PARAM" "$TARGET" || sudo sed -i "s/$/ $PARAM/" "$TARGET"
+echo "Updated $TARGET; reboot required to take effect."
+
+# Immediate (until reboot)
+echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
+
+# Verify after reboot
+cat /proc/cmdline | tr ' ' '\n' | grep usbcore.autosuspend || true
+cat /sys/module/usbcore/parameters/autosuspend
+```
+
+3) CPU governor: performance
+
+```bash
+# Persistent via kernel parameter
+TARGET=/boot/firmware/cmdline.txt; [ -f /boot/cmdline.txt ] && TARGET=/boot/cmdline.txt
+PARAM=cpufreq.default_governor=performance
+grep -q "$PARAM" "$TARGET" || sudo sed -i "s/$/ $PARAM/" "$TARGET"
+echo "Updated $TARGET; reboot required to take effect."
+
+# Immediate (until reboot)
+for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance | sudo tee "$f"; done
+
+# Verify
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor | uniq
+```
+
+4) RTC policy: local time only (no network time)
+
+```bash
+# Store local time in RTC and read at boot
+sudo timedatectl set-local-rtc 1
+
+# Optional: disable systemd-timesyncd if present, and fake-hwclock
+sudo systemctl disable --now systemd-timesyncd.service 2>/dev/null || true
+sudo systemctl mask systemd-timesyncd.service 2>/dev/null || true
+sudo systemctl stop fake-hwclock.service 2>/dev/null || true
+sudo systemctl mask fake-hwclock.service 2>/dev/null || true
+```
 
