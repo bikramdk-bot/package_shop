@@ -32,4 +32,10 @@
             border-radius:6px;text-decoration:none;font-weight:bold;"
      data-i18n="navLog">🗒️ Log</a>
 </div>
+{% if license_locked %}
+       <div style="position:fixed; top:70px; right:10px; background:#ffc107; color:#212529; padding:10px 12px; border-radius:6px; z-index:1000; max-width:320px; box-shadow:0 2px 6px rgba(0,0,0,0.12);">
+              <strong>License Invalid</strong>
+              <div style="font-size:90%;">This device's license does not match this Raspberry Pi. Please contact support to rebind or renew the license.</div>
+       </div>
+{% endif %}
 

@@ -100,7 +100,13 @@
         const res = await fetch('/license_status');
         if (res.ok) {
           const data = await res.json();
-          if (!data.active) {
+          if (!data.active || data.locked) {
+            const h = document.querySelector('#licenseBlocker h2');
+            const p = document.querySelector('#licenseBlocker p');
+            if (data.locked) {
+              h.textContent = '🔒 License invalid';
+              p.textContent = 'This device is not licensed for this Raspberry Pi. Contact support.';
+            }
             document.getElementById('licenseBlocker').style.display = 'flex';
           }
         }

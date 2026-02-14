@@ -6,6 +6,8 @@ from license_manager import (
     ensure_default_license,
     get_current_expiry,
     apply_token,
+    is_license_locked,
+    start_license_monitor,
 )
 import sqlite3, os
 from datetime import datetime, timedelta, date
@@ -22,6 +24,11 @@ app.config["PREFERRED_URL_SCHEME"] = "https"
 
 # Initialize external directories and migrate legacy files
 init_dirs_and_migrate()
+
+# Ensure token DB and license exist, then start periodic license monitor
+ensure_token_db()
+ensure_default_license()
+start_license_monitor()
 
 # Use external data directory for DB storage
 DB_PATH = str(resolve_data("packets.db"))
@@ -125,6 +132,30 @@ def get_shop_meta():
     cfg = read_shop_info() or {}
     shop_id = cfg.get("shop_id") if isinstance(cfg, dict) else None
     return {"shop_id": shop_id, "cpu_serial": get_cpu_serial()}
+
+
+@app.context_processor
+def inject_license_state():
+    try:
+        locked = is_license_locked()
+    except Exception:
+        locked = False
+    return {"license_locked": locked}
+
+
+@app.before_request
+def _license_guard():
+    # Short-circuit API-like requests (JSON clients) when license is invalid.
+    try:
+        if is_license_locked():
+            accept = request.headers.get("Accept", "")
+            prefers_json = "application/json" in accept or request.path.startswith("/api")
+            if prefers_json:
+                return jsonify({"error": "LICENSE_INVALID"}), 403
+            # For non-JSON requests we allow rendering so the UI can display the support message
+    except Exception:
+        # On error determining license, do not block requests
+        pass
 
 def _restart_api_service():
     # Backward-compatible single-service restart
@@ -1678,11 +1709,19 @@ def license_status():
         info = get_current_expiry()
         today = date.today()
         exp_dt = datetime.strptime(info.expiry_str, "%Y-%m-%d").date()
-        active = today <= exp_dt
+        # Determine if license is expired and whether device is CPU-locked
+        expired = today > exp_dt
+        try:
+            locked = is_license_locked()
+        except Exception:
+            locked = False
+        active = (not expired) and (not locked)
         return jsonify({
             "expiry": info.expiry_str,
             "today": today.strftime("%Y-%m-%d"),
-            "active": active
+            "active": active,
+            "expired": expired,
+            "locked": locked,
         })
     except Exception as e:
         return jsonify({"error": "license_status_failed", "detail": str(e)}), 500
