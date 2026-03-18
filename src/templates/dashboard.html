@@ -123,7 +123,17 @@
       const res = await fetch('/license_status');
       if (!res.ok) throw new Error('status ' + res.status);
       const data = await res.json();
-      if (!data.active) {
+      if (!data.active || data.locked) {
+        // Update blocker text for locked vs expired
+        const h = document.querySelector('#licenseBlocker h2');
+        const p = document.querySelector('#licenseBlocker p');
+        if (data.locked) {
+          h.textContent = '🔒 License invalid';
+          p.textContent = 'This device is not licensed for this Raspberry Pi. Contact support.';
+        } else {
+          h.textContent = '🔒 License expired';
+          p.textContent = 'Please activate your license to continue using the dashboard.';
+        }
         document.getElementById('licenseBlocker').style.display = 'flex';
       }
     } catch (e) {

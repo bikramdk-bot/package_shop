@@ -148,6 +148,21 @@ def get_shop_id() -> str:
     return ensure_shop_info()
 
 
+def get_provisioned_cpu_id() -> Optional[str]:
+    """Read a hardcoded `cpu_id` from `shop_info.json` if present.
+
+    This value is considered read-only and used to validate the running device.
+    """
+    try:
+        data = _load_json(SHOP_INFO_PATH) or {}
+        cpu = data.get("cpu_id")
+        if cpu:
+            return str(cpu).strip()
+    except Exception:
+        pass
+    return None
+
+
 # ---------------- License management ----------------
 
 def ensure_default_license(days: int = 30) -> LicenseInfo:
@@ -165,12 +180,20 @@ def ensure_default_license(days: int = 30) -> LicenseInfo:
 
     # Ensure at least today + days
     min_expiry = today + timedelta(days=days)
+    # Compose license structure with last_refresh; do NOT bind cpu_id automatically.
+    # If a cpu_id already exists in the file, preserve it. If missing, leave it absent
+    # so that manual provisioning is required.
+    last_refresh = datetime.utcnow().isoformat()
     if expiry < min_expiry:
         expiry = min_expiry
-        _write_license_base64(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
-    else:
-        # normalize format
-        _write_license_base64(LICENSE_PATH, {"expiry": expiry.strftime(DATE_FMT)})
+
+    payload = {"expiry": expiry.strftime(DATE_FMT)}
+    stored_cpu = data.get("cpu_id")
+    if stored_cpu:
+        payload["cpu_id"] = str(stored_cpu).strip()
+    # Do NOT auto-bind local CPU when missing; operator should provision cpu_id manually.
+    payload["last_refresh"] = last_refresh
+    _write_license_base64(LICENSE_PATH, payload)
 
     return LicenseInfo(expiry=expiry)
 
@@ -188,7 +211,88 @@ def read_license() -> LicenseInfo:
 
 
 def write_license(info: LicenseInfo) -> None:
-    _write_license_base64(LICENSE_PATH, {"expiry": info.expiry_str})
+    # Preserve existing cpu_id and update last_refresh when writing.
+    # Do NOT introduce or overwrite cpu_id with the local device id.
+    data = _load_license_json(LICENSE_PATH) or {}
+    stored_cpu = data.get("cpu_id")
+    payload = {"expiry": info.expiry_str}
+    if stored_cpu:
+        payload["cpu_id"] = str(stored_cpu).strip()
+    payload["last_refresh"] = datetime.utcnow().isoformat()
+    _write_license_base64(LICENSE_PATH, payload)
+
+
+# ---------------- License validity & binding ----------------
+def _get_license_raw() -> Optional[dict]:
+    return _load_license_json(LICENSE_PATH)
+
+
+def is_license_locked() -> bool:
+    """Return True when stored license is bound to a different CPU than the one running.
+
+    If license file is missing or malformed, treat as unlocked by creating a default license.
+    """
+    # Prefer operator-provisioned cpu_id in shop_info.json (read-only).
+    provisioned = get_provisioned_cpu_id()
+    if not provisioned:
+        # Missing provisioned cpu_id -> treat as locked until operator provisions it.
+        return True
+    local = DEVICE_CPU_ID or get_local_cpu_id()
+    if not local:
+        # Cannot determine local CPU -> treat as locked (cannot verify identity).
+        return True
+    return str(provisioned).strip() != str(local).strip()
+
+
+def refresh_license_if_valid() -> None:
+    """If the current device CPU matches the license binding, update last_refresh and rewrite license.
+
+    If there is no binding yet, bind to the current device.
+    """
+    data = _get_license_raw() or {}
+    local = DEVICE_CPU_ID or get_local_cpu_id()
+    if not local:
+        return
+    provisioned = get_provisioned_cpu_id()
+    # Only update last_refresh when provisioned cpu_id exists and matches the local CPU
+    if not provisioned or str(provisioned).strip() != str(local).strip():
+        # Missing or mismatched cpu -> do not modify the license file
+        return
+    # Preserve expiry if present, otherwise compute default
+    exp = data.get("expiry")
+    try:
+        expiry_date = datetime.strptime(exp, DATE_FMT).date() if exp else None
+    except Exception:
+        expiry_date = None
+    if not expiry_date:
+        expiry_date = (date.today() + timedelta(days=30))
+    payload = {"expiry": expiry_date.strftime(DATE_FMT), "cpu_id": str(local).strip(), "last_refresh": datetime.utcnow().isoformat()}
+    _write_license_base64(LICENSE_PATH, payload)
+
+
+def start_license_monitor(interval_seconds: int = 24 * 3600) -> None:
+    """Start a background thread that refreshes license once every `interval_seconds`.
+
+    Thread is a daemon so it won't block process shutdown.
+    """
+    try:
+        import threading
+
+        def _loop():
+            while True:
+                try:
+                    refresh_license_if_valid()
+                except Exception:
+                    pass
+                try:
+                    threading.Event().wait(interval_seconds)
+                except Exception:
+                    break
+
+        t = threading.Thread(target=_loop, daemon=True, name="license-monitor")
+        t.start()
+    except Exception:
+        pass
 
 
 # ---------------- Token DB ----------------
