@@ -39,7 +39,7 @@
     "parcelsInShop": "📦 Pakker i butikken",
     "colId": "ID",
     "colProvider": "Udbyder",
-    "colDigits": "Cifre",
+    "colDigits": "Sidst-4",
     "colBarcode": "Stregkode",
     "colStatus": "Status",
     "colActions": "Handlinger",
@@ -48,7 +48,7 @@
     "liveCustomersTitle": "Live Kundeindgange",
     "liveQueue": "👀 Live kundekø",
     "colCollection": "Indsamlings-ID",
-    "colKode": "Afhentningskode",
+    "colKode": "Kode",
     "colCountdown": "Nedtælling",
   "btnHold": "Hold",
   "btnResolve": "Afslut",
@@ -92,7 +92,7 @@
     "licenseExpiredTitle": "🔒 Licensen er udløbet",
     "licenseExpiredMsg": "Aktivér din licens for at fortsætte med at bruge dashboardet.",
     "activateLicense": "Aktivér licens",
-    "assignCustomerNumber": "Kundenummer"
+    "assignCustomerNumber": "Nr."
     ,"printMode": "Udskriv labels",
     "printOn": "ON",
     "printOff": "OFF",
@@ -147,7 +147,7 @@
     "parcelsInShop": "📦 Parcels in Shop",
     "colId": "ID",
     "colProvider": "Provider",
-    "colDigits": "Digits",
+    "colDigits": "Last-4",
     "colBarcode": "Barcode",
     "colStatus": "Status",
     "colActions": "Actions",
@@ -156,7 +156,7 @@
     "liveCustomersTitle": "Live Customer Entries",
     "liveQueue": "👀 Live Customer Queue",
     "colCollection": "Collection",
-    "colKode": "Collection Code",
+    "colKode": "Code",
     "colCountdown": "Countdown",
   "btnHold": "Hold",
   "btnResolve": "Resolve",
@@ -200,7 +200,7 @@
     "licenseExpiredTitle": "🔒 License expired",
     "licenseExpiredMsg": "Please activate your license to continue using the dashboard.",
     "activateLicense": "Activate License",
-    "assignCustomerNumber": "Customer Number"
+    "assignCustomerNumber": "Number"
     ,"printMode": "Print labels",
     "printOn": "ON",
     "printOff": "OFF",
