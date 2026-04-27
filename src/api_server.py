@@ -16,6 +16,8 @@ import json
 import socket
 import subprocess
 import glob
+import re
+from typing import Optional, List, Dict
 from paths import resolve_data, init_dirs_and_migrate
 
 app = Flask(__name__)
@@ -76,6 +78,71 @@ PRINTER_DEVICE = _detect_default_printer_device()
 # Canonical config now lives in the external data directory
 SHOP_INFO_PATH = str(resolve_data("shop_info.json"))
 
+DEFAULT_PROVIDER_CONFIGS = [
+    {
+        "key": "PostNord",
+        "enabled": True,
+        "background_color": "#1e90ff",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": False,
+        "extra_code_length": 0,
+        "is_standard": True,
+    },
+    {
+        "key": "DAO",
+        "enabled": True,
+        "background_color": "#e11d48",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": True,
+        "extra_code_length": 5,
+        "is_standard": True,
+    },
+    {
+        "key": "GLS",
+        "enabled": True,
+        "background_color": "#9ca3af",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": True,
+        "extra_code_length": 3,
+        "is_standard": True,
+    },
+    {
+        "key": "UPS",
+        "enabled": True,
+        "background_color": "#111827",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": False,
+        "extra_code_length": 0,
+        "is_standard": True,
+    },
+    {
+        "key": "Bring",
+        "enabled": True,
+        "background_color": "#22c55e",
+        "text_color": "#ffffff",
+        "ask_last4": False,
+        "requires_extra_code": True,
+        "extra_code_length": 5,
+        "is_standard": True,
+    },
+    {
+        "key": "DHL",
+        "enabled": True,
+        "background_color": "#f59e0b",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": False,
+        "extra_code_length": 0,
+        "is_standard": True,
+    },
+]
+
+DEFAULT_PROVIDER_MAP = {cfg["key"].upper(): cfg for cfg in DEFAULT_PROVIDER_CONFIGS}
+
 # Legacy home→src migration removed; centralized in paths.init_dirs_and_migrate()
 
 def read_shop_info():
@@ -89,6 +156,141 @@ def read_shop_info():
         pass
     return {}
 
+
+def _provider_logo_path(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "", (name or "").strip().lower())
+    return f"/static/logos/{slug}.png" if slug else ""
+
+
+def _sanitize_provider_name(name: Optional[str], fallback: str = "") -> str:
+    value = (name or fallback or "").strip()
+    value = re.sub(r"\s+", " ", value)
+    if not value:
+        return ""
+    canon = DEFAULT_PROVIDER_MAP.get(value.upper())
+    if canon:
+        return canon["key"]
+    return value[:32]
+
+
+def _sanitize_hex_color(value: Optional[str], fallback: str) -> str:
+    color = (value or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        return color.lower()
+    return fallback
+
+
+def _to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _sanitize_provider_config(raw: dict, base: Optional[dict] = None) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    base_cfg = dict(base or {})
+    key = _sanitize_provider_name(raw.get("key"), base_cfg.get("key", ""))
+    if not key:
+        return None
+    default_cfg = dict(DEFAULT_PROVIDER_MAP.get(key.upper(), {}))
+    merged = {}
+    merged.update(default_cfg)
+    merged.update(base_cfg)
+
+    enabled = _to_bool(raw.get("enabled", merged.get("enabled", True)))
+    ask_last4_default = merged.get("ask_last4", True)
+    if raw.get("entry_mode") == "code_only" or merged.get("entry_mode") == "code_only":
+        ask_last4_default = False
+    ask_last4 = _to_bool(raw.get("ask_last4", ask_last4_default))
+    requires_extra_code = _to_bool(raw.get("requires_extra_code", merged.get("requires_extra_code", False)))
+    try:
+        extra_code_length = int(raw.get("extra_code_length", merged.get("extra_code_length", 0)) or 0)
+    except (TypeError, ValueError):
+        extra_code_length = int(merged.get("extra_code_length", 0) or 0)
+    extra_code_length = max(0, min(extra_code_length, 12))
+    if requires_extra_code and extra_code_length <= 0:
+        extra_code_length = int(merged.get("extra_code_length", 0) or 5)
+    if not requires_extra_code:
+        extra_code_length = 0
+
+    background_fallback = merged.get("background_color") or "#4b5563"
+    background_color = _sanitize_hex_color(raw.get("background_color"), background_fallback)
+
+    config = {
+        "key": key,
+        "enabled": enabled,
+        "background_color": background_color,
+        "text_color": "#ffffff",
+        "ask_last4": ask_last4,
+        "requires_extra_code": requires_extra_code,
+        "extra_code_length": extra_code_length,
+        "is_standard": _to_bool(raw.get("is_standard", merged.get("is_standard", bool(default_cfg)))),
+        "logo_path": _provider_logo_path(key),
+    }
+    return config
+
+
+def get_provider_configs(include_disabled: bool = True) -> List[Dict]:
+    cfg = read_shop_info() or {}
+    saved = cfg.get("providers") if isinstance(cfg, dict) else None
+    ordered = []
+    seen = set()
+
+    if isinstance(saved, list):
+        saved_map = {}
+        for item in saved:
+            name = _sanitize_provider_name((item or {}).get("key", ""))
+            if name:
+                saved_map[name.upper()] = item
+        for default_cfg in DEFAULT_PROVIDER_CONFIGS:
+            key_upper = default_cfg["key"].upper()
+            raw = saved_map.pop(key_upper, default_cfg)
+            normalized = _sanitize_provider_config(raw, default_cfg)
+            if normalized:
+                ordered.append(normalized)
+                seen.add(normalized["key"].upper())
+        for item in saved:
+            normalized = _sanitize_provider_config(item)
+            if not normalized:
+                continue
+            key_upper = normalized["key"].upper()
+            if key_upper in seen:
+                continue
+            ordered.append(normalized)
+            seen.add(key_upper)
+    else:
+        for default_cfg in DEFAULT_PROVIDER_CONFIGS:
+            normalized = _sanitize_provider_config(default_cfg, default_cfg)
+            if normalized:
+                ordered.append(normalized)
+
+    if include_disabled:
+        return ordered
+    return [cfg for cfg in ordered if cfg.get("enabled")]
+
+
+def get_provider_config(provider_name: str) -> dict:
+    key = _sanitize_provider_name(provider_name)
+    for cfg in get_provider_configs(include_disabled=True):
+        if cfg.get("key", "").upper() == key.upper():
+            return cfg
+    return {
+        "key": key or (provider_name or "").strip(),
+        "enabled": True,
+        "background_color": "#4b5563",
+        "text_color": "#ffffff",
+        "ask_last4": True,
+        "requires_extra_code": False,
+        "extra_code_length": 0,
+        "is_standard": False,
+        "logo_path": _provider_logo_path(key or provider_name),
+    }
+
 def write_shop_info(patch: dict):
     """Write merged shop_info to src/shop_info.json (canonical)."""
     data = read_shop_info()
@@ -97,6 +299,37 @@ def write_shop_info(patch: dict):
     data.update(patch)
     with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/provider_settings", methods=["GET"])
+def provider_settings_get():
+    return jsonify({"providers": get_provider_configs(include_disabled=True)})
+
+
+@app.route("/provider_settings", methods=["POST"])
+def provider_settings_post():
+    payload = request.get_json(force=True) or {}
+    providers = payload.get("providers")
+    if not isinstance(providers, list):
+        return jsonify({"ok": False, "error": "providers must be a list"}), 400
+
+    normalized = []
+    seen = set()
+    for item in providers:
+        normalized_item = _sanitize_provider_config(item)
+        if not normalized_item:
+            continue
+        key_upper = normalized_item["key"].upper()
+        if key_upper in seen:
+            continue
+        normalized.append(normalized_item)
+        seen.add(key_upper)
+
+    if not normalized:
+        return jsonify({"ok": False, "error": "at least one provider is required"}), 400
+
+    write_shop_info({"providers": normalized})
+    return jsonify({"ok": True, "providers": get_provider_configs(include_disabled=True)})
 
 def get_cpu_serial():
     """Return Raspberry Pi CPU serial if available.
@@ -535,7 +768,7 @@ def start_cleanup_scheduler(interval_hours: int = 24):
 
 
 
-def get_setting(key: str, default: str = None):
+def get_setting(key: str, default: Optional[str] = None):
     conn = open_db()
     cur = conn.cursor()
     try:
@@ -1323,7 +1556,7 @@ def scan_and_print():
     if req_print is None:
         val = get_setting('print_enabled', '1')
         try:
-            do_print = bool(int(val))
+            do_print = bool(int(val or '1'))
         except Exception:
             do_print = True
     else:
@@ -1347,7 +1580,7 @@ def get_print_mode():
     """Return current server-side print mode as JSON: { print: true|false }"""
     val = get_setting('print_enabled', '1')
     try:
-        enabled = bool(int(val))
+        enabled = bool(int(val or '1'))
     except Exception:
         enabled = True
     return jsonify({"print": enabled})
@@ -1373,31 +1606,26 @@ def set_print_mode():
 @app.route("/customer_entry", methods=["POST"])
 def create_customer_entry():
     data = request.get_json(force=True)
-    provider = (data.get("provider") or "").strip()
+    provider = _sanitize_provider_name(data.get("provider"))
     digits = (data.get("digits") or "").strip()
     kode = (data.get("kode") or "").strip() or None
 
-    # Canonicalize provider labels
-    canon = {
-        'POSTNORD': 'PostNord',
-        'DAO': 'DAO',
-        'GLS': 'GLS',
-        'BRING': 'Bring',
-        'UPS': 'UPS',
-        'DHL': 'DHL'
-    }
-    provider = canon.get(provider.upper(), provider)
-
     if not provider:
         return jsonify({"error": "Missing provider"}), 400
-    # Provider-specific kode rules
-    # Bring requires a 5-digit kode; UPS should behave like GLS (no kode requirement)
-    if provider == "Bring":
-        if not kode or not kode.isdigit() or len(kode) != 5:
-            return jsonify({"error": "Bring requires 5-digit kode"}), 400
-    if provider == "DAO":
-        if not kode or not kode.isdigit() or len(kode) != 5:
-            return jsonify({"error": "DAO requires 5-digit kode"}), 400
+
+    provider_cfg = get_provider_config(provider)
+    code_len = int(provider_cfg.get("extra_code_length") or 0)
+    ask_last4 = bool(provider_cfg.get("ask_last4", True))
+    requires_extra_code = bool(provider_cfg.get("requires_extra_code"))
+
+    if ask_last4 and not digits:
+        return jsonify({"error": f"{provider} requires digits"}), 400
+
+    if requires_extra_code:
+        if not kode or not kode.isdigit() or len(kode) != code_len:
+            return jsonify({"error": f"{provider} requires {code_len}-digit code"}), 400
+    elif not ask_last4:
+        return jsonify({"error": f"{provider} must ask for digits or collection code"}), 400
 
     conn = open_db()
     cur = conn.cursor()

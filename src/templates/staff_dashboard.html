@@ -18,6 +18,22 @@
     .success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
     .error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
     .expiry { font-weight: 600; }
+    .provider-stack { display: grid; gap: 0.75rem; margin-top: 1rem; }
+    .provider-row { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.9rem; display: grid; gap: 0.75rem; }
+    .provider-grid { display: grid; grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) auto auto auto minmax(110px, 0.8fr) auto; gap: 0.75rem; align-items: end; }
+    .field { display: grid; gap: 0.35rem; }
+    .field label { font-size: 0.85rem; color: #4b5563; }
+    .field input[type="text"],
+    .field input[type="number"] { width: 100%; }
+    .field input[type="color"] { width: 100%; min-height: 42px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; padding: 0.2rem; }
+    .field.checkbox { display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.4rem; }
+    .field.checkbox label { font-size: 0.95rem; color: #111827; }
+    .provider-preview { border-radius: 10px; color: #fff; font-weight: 700; padding: 0.8rem 1rem; min-height: 52px; display: flex; align-items: center; }
+    .danger { background: #dc2626; }
+    .danger:hover { background: #b91c1c; }
+    @media (max-width: 980px) {
+      .provider-grid { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -55,6 +71,17 @@
       <button type="button" id="save-scanner">Save Scanner</button>
     </div>
     <div class="alert" id="scanner-msg" style="display:none;"></div>
+  </div>
+
+  <div class="card" style="margin-top:1rem; max-width: 980px;">
+    <h1>Providers</h1>
+    <div class="muted">Choose which providers are shown on the customer screen, set their background color, and define whether they require an extra collection code. Text color stays white on the customer side.</div>
+    <div class="provider-stack" id="provider-list"></div>
+    <div class="row" style="margin-top:1rem;">
+      <button type="button" id="add-provider">Add Provider</button>
+      <button type="button" id="save-providers">Save Providers</button>
+    </div>
+    <div class="alert" id="providers-msg" style="display:none;"></div>
   </div>
 
   <script>
@@ -149,6 +176,152 @@
 
     document.getElementById('save-scanner').addEventListener('click', saveScanner);
     loadScanners();
+
+    function createProviderRow(provider){
+      const row = document.createElement('div');
+      row.className = 'provider-row';
+      row.dataset.standard = provider.is_standard ? '1' : '0';
+      row.innerHTML = `
+        <div class="provider-preview" style="background:${provider.background_color || '#4b5563'};">${provider.key || ''}</div>
+        <div class="provider-grid">
+          <div class="field">
+            <label>Provider name</label>
+            <input type="text" class="provider-name" value="${provider.key || ''}" ${provider.is_standard ? 'readonly' : ''} />
+          </div>
+          <div class="field">
+            <label>Background color</label>
+            <input type="color" class="provider-color" value="${provider.background_color || '#4b5563'}" />
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" class="provider-enabled" ${provider.enabled !== false ? 'checked' : ''} />
+            <label>Show on customer screen</label>
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" class="provider-last4" ${provider.ask_last4 !== false ? 'checked' : ''} />
+            <label>Ask last-4 digits</label>
+          </div>
+          <div class="field checkbox">
+            <input type="checkbox" class="provider-extra" ${provider.requires_extra_code ? 'checked' : ''} />
+            <label>Collection code required</label>
+          </div>
+          <div class="field">
+            <label>Collection code length</label>
+            <input type="number" class="provider-code-len" min="1" max="12" value="${provider.extra_code_length || 0}" ${provider.requires_extra_code ? '' : 'disabled'} />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button type="button" class="delete-provider ${provider.is_standard ? '' : 'danger'}" ${provider.is_standard ? 'disabled' : ''}>${provider.is_standard ? 'Standard' : 'Remove'}</button>
+          </div>
+        </div>
+      `;
+
+      const nameInput = row.querySelector('.provider-name');
+      const colorInput = row.querySelector('.provider-color');
+      const last4Input = row.querySelector('.provider-last4');
+      const extraInput = row.querySelector('.provider-extra');
+      const codeLenInput = row.querySelector('.provider-code-len');
+      const preview = row.querySelector('.provider-preview');
+      const deleteBtn = row.querySelector('.delete-provider');
+
+      function refresh(){
+        preview.textContent = nameInput.value.trim() || 'New Provider';
+        preview.style.background = colorInput.value || '#4b5563';
+        const needsCode = extraInput.checked;
+        codeLenInput.disabled = !needsCode;
+        if (!needsCode) codeLenInput.value = '0';
+        if (needsCode && (!codeLenInput.value || Number(codeLenInput.value) < 1)) {
+          codeLenInput.value = '3';
+        }
+      }
+
+      nameInput.addEventListener('input', refresh);
+      colorInput.addEventListener('input', refresh);
+      last4Input.addEventListener('change', refresh);
+      extraInput.addEventListener('change', refresh);
+      deleteBtn.addEventListener('click', () => {
+        if (row.dataset.standard === '1') return;
+        row.remove();
+      });
+
+      refresh();
+      return row;
+    }
+
+    function collectProviders(){
+      return Array.from(document.querySelectorAll('#provider-list .provider-row')).map(row => {
+        const name = row.querySelector('.provider-name').value.trim();
+        const requiresExtra = row.querySelector('.provider-extra').checked;
+        return {
+          key: name,
+          enabled: row.querySelector('.provider-enabled').checked,
+          background_color: row.querySelector('.provider-color').value || '#4b5563',
+          ask_last4: row.querySelector('.provider-last4').checked,
+          requires_extra_code: requiresExtra,
+          extra_code_length: requiresExtra ? Number(row.querySelector('.provider-code-len').value || 0) : 0,
+          is_standard: row.dataset.standard === '1'
+        };
+      }).filter(p => p.key);
+    }
+
+    async function loadProviders(){
+      const list = document.getElementById('provider-list');
+      const msg = document.getElementById('providers-msg');
+      list.innerHTML = '';
+      msg.style.display = 'none';
+      try {
+        const r = await fetch('/provider_settings');
+        const j = await r.json();
+        const providers = Array.isArray(j.providers) ? j.providers : [];
+        providers.forEach(provider => list.appendChild(createProviderRow(provider)));
+      } catch (e) {
+        msg.textContent = 'Failed to load providers';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
+
+    async function saveProviders(){
+      const msg = document.getElementById('providers-msg');
+      msg.style.display = 'none';
+      const providers = collectProviders();
+      if (!providers.length) {
+        msg.textContent = 'Add at least one provider';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+        return;
+      }
+      try {
+        const r = await fetch('/provider_settings', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ providers })
+        });
+        const j = await r.json();
+        const ok = !!j.ok;
+        msg.textContent = ok ? 'Providers saved' : (j.error || 'Failed to save providers');
+        msg.className = 'alert ' + (ok ? 'success' : 'error');
+        msg.style.display = 'block';
+        if (ok) loadProviders();
+      } catch (e) {
+        msg.textContent = 'Error saving providers';
+        msg.className = 'alert error';
+        msg.style.display = 'block';
+      }
+    }
+
+    document.getElementById('add-provider').addEventListener('click', () => {
+      document.getElementById('provider-list').appendChild(createProviderRow({
+        key: '',
+        enabled: true,
+        background_color: '#4b5563',
+        ask_last4: true,
+        requires_extra_code: false,
+        extra_code_length: 0,
+        is_standard: false
+      }));
+    });
+    document.getElementById('save-providers').addEventListener('click', saveProviders);
+    loadProviders();
   </script>
 </body>
 </html>
