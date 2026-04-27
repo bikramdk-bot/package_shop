@@ -271,10 +271,10 @@
     </div>
   </div>
 
-  <!-- DAO kode modal -->
+  <!-- Provider code modal -->
   <div id="kodeOverlay" class="overlay" role="dialog" aria-modal="true">
     <div class="modal">
-      <h3 data-i18n="daoTitle">DAO: Indtast 5-cifret afhentningskode</h3>
+      <h3 id="kodeTitle" data-i18n="daoTitle">DAO: Indtast 5-cifret afhentningskode</h3>
       <div id="kodeBoxes" class="boxes"></div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="closeKode()" data-i18n="back">Tilbage</button>
@@ -328,28 +328,86 @@
         el.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
       applyI18n();
+      if (selectedProvider && targetLen) {
+        renderInputBoxes(targetLen, getSelectedProviderConfig()?.background_color);
+      }
+      if (document.getElementById('kodeOverlay').classList.contains('show')) {
+        updateKodeModalTitle();
+      }
     }
 
     // --- Provider tiles ---
-    const providersCfg = [
-      { key:'PostNord', color:'var(--postnord)', css:'p-postnord', img:'/static/logos/postnord.png', fallback:'PostNord' },
-      { key:'DAO',      color:'var(--dao)',      css:'p-dao',      img:'/static/logos/dao.png',      fallback:'DAO' },
-      { key:'GLS',      color:'var(--gls)',      css:'p-gls',      img:'/static/logos/gls.png',      fallback:'GLS' },
-      { key:'UPS',      color:'var(--ups)',      css:'p-ups',      img:'/static/logos/ups.png',      fallback:'UPS' },
-      { key:'Bring',    color:'var(--bring)',    css:'p-bring',    img:'/static/logos/bring.png',    fallback:'Bring' },
-      { key:'DHL',      color:'var(--dhl)',      css:'p-dhl',      img:'/static/logos/dhl.png',      fallback:'DHL' },
-    ];
-    const providerVisible = { PostNord:true, DAO:true, GLS:true, Bring:true, UPS:true, DHL:true };// configurable per shop
-
+    let providersCfg = [];
     let selectedProvider = null;
     let inputDigits = '';
     let targetLen = 0; // dynamic length based on provider/result
     let lastLookupCount = 0; // optional hint only
     let sessionId = null; // generated only when customer finishes (No, finish)
     let entryIds = []; // accumulate entry IDs for this session
+    let kodeTargetLen = 5;
     // QR-driven auto-escalation
     let qrRawCode = null; // full scanned QR string (raw)
     let isQrAuto = false; // when true, handleSubmit will auto-advance using qrSessionDigits
+    function getSelectedProviderConfig() {
+      return providersCfg.find(p => p.key === selectedProvider) || null;
+    }
+    function providerAsksLast4() {
+      return getSelectedProviderConfig()?.ask_last4 !== false;
+    }
+    function providerNeedsExtraCode() {
+      return !!getSelectedProviderConfig()?.requires_extra_code;
+    }
+    function getProviderCodeLength() {
+      const len = Number(getSelectedProviderConfig()?.extra_code_length || 0);
+      return len > 0 ? len : 5;
+    }
+    function localizedCodePrompt(count) {
+      if (currentLang === 'da') return `Indtast ${count}-cifret kode`;
+      if (currentLang === 'de') return `Geben Sie den ${count}-stelligen Code ein`;
+      if (currentLang === 'sv') return `Ange den ${count}-siffriga koden`;
+      return `Enter the ${count}-digit code`;
+    }
+    function localizedNeedCodeMessage(count) {
+      if (currentLang === 'da') return `Angiv ${count} cifre`;
+      if (currentLang === 'de') return `${count} Ziffern eingeben`;
+      if (currentLang === 'sv') return `Ange ${count} siffror`;
+      return `Enter ${count} digits`;
+    }
+    function updateKodeModalTitle() {
+      const title = document.getElementById('kodeTitle');
+      if (!title) return;
+      const provider = getSelectedProviderConfig();
+      const label = provider?.key || 'Code';
+      title.textContent = `${label}: ${localizedCodePrompt(kodeTargetLen)}`;
+    }
+    async function loadProviderSettings() {
+      const fallback = [
+        { key: 'PostNord', enabled: true, background_color: '#1e90ff', ask_last4: true, requires_extra_code: false, extra_code_length: 0, logo_path: '/static/logos/postnord.png' },
+        { key: 'DAO', enabled: true, background_color: '#e11d48', ask_last4: true, requires_extra_code: true, extra_code_length: 5, logo_path: '/static/logos/dao.png' },
+        { key: 'GLS', enabled: true, background_color: '#9ca3af', ask_last4: true, requires_extra_code: true, extra_code_length: 3, logo_path: '/static/logos/gls.png' },
+        { key: 'UPS', enabled: true, background_color: '#111827', ask_last4: true, requires_extra_code: false, extra_code_length: 0, logo_path: '/static/logos/ups.png' },
+        { key: 'Bring', enabled: true, background_color: '#22c55e', ask_last4: false, requires_extra_code: true, extra_code_length: 5, logo_path: '/static/logos/bring.png' },
+        { key: 'DHL', enabled: true, background_color: '#f59e0b', ask_last4: true, requires_extra_code: false, extra_code_length: 0, logo_path: '/static/logos/dhl.png' },
+      ];
+      try {
+        const res = await fetch('/provider_settings');
+        const data = await res.json();
+        const list = Array.isArray(data?.providers) ? data.providers : [];
+        providersCfg = (list.length ? list : fallback)
+          .filter(p => p && p.enabled !== false)
+          .map(p => ({
+            key: p.key,
+            fallback: p.key,
+            background_color: p.background_color || '#4b5563',
+            ask_last4: p.ask_last4 !== false,
+            requires_extra_code: !!p.requires_extra_code,
+            extra_code_length: Number(p.extra_code_length || 0),
+            img: p.logo_path || `/static/logos/${String(p.key || '').toLowerCase()}.png`
+          }));
+      } catch {
+        providersCfg = fallback.map(p => ({ ...p, fallback: p.key, img: p.logo_path }));
+      }
+    }
     function extractDigitsByRule(code, n) {
       if (!code || !n) return '';
       const s = String(code).trim().toUpperCase();
@@ -383,9 +441,10 @@
     function renderProviders() {
       const wrap = document.getElementById('providers');
       wrap.innerHTML = '';
-      providersCfg.filter(p => providerVisible[p.key]).forEach(p => {
+      providersCfg.forEach(p => {
         const div = document.createElement('div');
-        div.className = `provider ${p.css}`;
+        div.className = 'provider';
+        div.style.background = p.background_color || '#4b5563';
         div.setAttribute('role','button');
         div.setAttribute('aria-label', p.key);
         div.onclick = () => selectProvider(p);
@@ -397,7 +456,7 @@
           img.remove();
           const fb = document.createElement('div');
           fb.className = 'fallback';
-          fb.style.background = p.color;
+          fb.style.background = p.background_color || '#4b5563';
           fb.textContent = p.fallback;
           div.appendChild(fb);
         };
@@ -420,12 +479,10 @@
 
       inputDigits = '';
       document.getElementById('message').textContent = '';
-      if (selectedProvider === 'DAO') targetLen = 4; // start with last 4 (DAO uses kode modal later)
-  else if (selectedProvider === 'Bring') targetLen = 5; // Bring asks 5-digit afhentningskode directly
-  else targetLen = 4; // PostNord/GLS/UPS/DHL start with 4
-      renderInputBoxes(targetLen, p.color);
-      // show Scan QR for flows starting with last-4 (i.e., not Bring)
-      const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
+      kodeTargetLen = getProviderCodeLength();
+      targetLen = providerAsksLast4() ? 4 : kodeTargetLen;
+      renderInputBoxes(targetLen, p.background_color);
+      const showQr = selectedProvider && providerAsksLast4() && targetLen === 4;
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) qrBtn.style.display = showQr ? '' : 'none';
       // show action buttons now that a provider is chosen
@@ -466,8 +523,8 @@
       const promptEl = document.getElementById('prompt');
       if (promptEl) {
         let txt = '';
-        if (selectedProvider === 'Bring') {
-          txt = (i18n?.[currentLang]?.promptBring5) || 'Enter the 5-digit code';
+        if (!providerAsksLast4()) {
+          txt = localizedCodePrompt(count);
         } else {
           if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter the last 4 digits';
           else if (count === 6) txt = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
@@ -545,11 +602,13 @@
       const msg = document.getElementById('message');
       msg.className = 'msg';
       if (!selectedProvider) { msg.textContent = (i18n?.[currentLang]?.chooseProvider)||'Vælg udbyder først'; return; }
-      if (inputDigits.length < targetLen) { msg.textContent = (i18n?.[currentLang]?.completeDigits)||'Udfyld alle felter'; return; }
+      if (inputDigits.length < targetLen) {
+        msg.textContent = !providerAsksLast4() ? localizedNeedCodeMessage(targetLen) : ((i18n?.[currentLang]?.completeDigits)||'Udfyld alle felter');
+        return;
+      }
 
-      // Bring goes straight to live with 5-digit kode; UPS now follows the GLS flow
-      if (selectedProvider === 'Bring') {
-        if (inputDigits.length !== 5) { const m=document.getElementById('message'); m.className='msg error'; m.textContent=(i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
+      if (!providerAsksLast4()) {
+        if (inputDigits.length !== targetLen) { const m=document.getElementById('message'); m.className='msg error'; m.textContent = localizedNeedCodeMessage(targetLen); return; }
         await submitCustomerEntry(inputDigits);
         return;
       }
@@ -563,7 +622,7 @@
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
 
-      if (['PostNord','GLS','DAO','UPS','DHL'].includes(selectedProvider)) {
+      if (providerAsksLast4()) {
         // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
           if (targetLen === 4) {
@@ -661,8 +720,7 @@
             isQrAuto = false; qrRawCode = null;
             return;
           }
-          // DAO requires kode after we have a match
-          if (selectedProvider === 'DAO') { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
+          if (providerNeedsExtraCode()) { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
           // Otherwise submit entry immediately
           isQrAuto = false; qrRawCode = null;
           await submitCustomerEntry();
@@ -673,8 +731,7 @@
 
   async function submitCustomerEntry(kode) {
       const payload = { provider: selectedProvider };
-      // For Bring, send kode and omit digits; others (incl. UPS) send digits
-      if (selectedProvider === 'Bring') {
+      if (!providerAsksLast4()) {
         payload.kode = kode;
       } else {
         payload.digits = inputDigits;
@@ -713,11 +770,13 @@
   document.getElementById('doneOverlay').classList.add('show');
     }
 
-    // --- DAO kode modal ---
+    // --- Provider code modal ---
     let kodeDigits = '';
     function openKodeModal() {
+      kodeTargetLen = getProviderCodeLength();
       kodeDigits='';
-      renderKodeBoxes(5);
+      renderKodeBoxes(kodeTargetLen);
+      updateKodeModalTitle();
       document.getElementById('kodeOverlay').classList.add('show');
       activeKeyHandler = handleKodeKey; // redirect key events to kode modal
       document.getElementById('kodeMsg').textContent = '';
@@ -741,13 +800,12 @@
     function handleKodeKey(e) {
       const msg = document.getElementById('kodeMsg');
       msg.className = 'msg';
-      if (e.key === 'Backspace') { kodeDigits = kodeDigits.slice(0,-1); renderKodeBoxes(5); return; }
+      if (e.key === 'Backspace') { kodeDigits = kodeDigits.slice(0,-1); renderKodeBoxes(kodeTargetLen); return; }
       if (e.key === 'Enter') { submitCustomerEntryWithKode(); return; }
       if (/^[0-9]$/.test(e.key)) {
-        if (kodeDigits.length < 5) {
-          kodeDigits += e.key; renderKodeBoxes(5);
-          // debounce auto-submit when we reach 5 digits
-          if (kodeDigits.length === 5) {
+        if (kodeDigits.length < kodeTargetLen) {
+          kodeDigits += e.key; renderKodeBoxes(kodeTargetLen);
+          if (kodeDigits.length === kodeTargetLen) {
             // blink modal submit button
             const kbtn = document.getElementById('kodeSubmitBtn');
             if (kbtn) {
@@ -762,7 +820,7 @@
     }
     async function submitCustomerEntryWithKode() {
       const msg = document.getElementById('kodeMsg');
-      if (kodeDigits.length !== 5) { msg.className='msg error'; msg.textContent = (i18n?.[currentLang]?.need5Digits)||'Angiv 5 cifre'; return; }
+      if (kodeDigits.length !== kodeTargetLen) { msg.className='msg error'; msg.textContent = localizedNeedCodeMessage(kodeTargetLen); return; }
       closeKode();
       await submitCustomerEntry(kodeDigits);
     }
@@ -775,7 +833,7 @@
       document.getElementById('message').textContent = '';
       const qrBtn = document.getElementById('scanQrBtn');
       if (qrBtn) {
-        const showQr = selectedProvider && selectedProvider !== 'Bring' && targetLen === 4;
+        const showQr = selectedProvider && providerAsksLast4() && targetLen === 4;
         qrBtn.style.display = showQr ? '' : 'none';
       }
       // restore all providers to bright again
@@ -1066,6 +1124,7 @@
     // Init
     (async function init(){
       await loadTranslations();
+      await loadProviderSettings();
       renderProviders();
       // ensure flags reflect current language
       updateLanguage(currentLang);
