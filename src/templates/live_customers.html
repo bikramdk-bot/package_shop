@@ -9,7 +9,11 @@
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
   th { background: #f0f0f0; }
-  #table tbody td { font-size: 3rem; font-weight: 600; line-height: 1.1; }
+  #table th.separator-right,
+  #table td.separator-right { border-right: 8px solid #4b5563; }
+  #table th.after-separator,
+  #table td.after-separator { border-left: 0; }
+  #table tbody td { font-size: 2rem; font-weight: 600; line-height: 1.1; }
   #table tbody td.live-last4 { font-weight: 800; }
   #table tbody td.live-actions { font-size: 1rem; font-weight: 400; }
   #table tbody td.live-actions button,
@@ -53,9 +57,9 @@
     <thead>
       <tr>
         <th data-i18n="assignCustomerNumber">Customer Number</th>
-        <th data-i18n="colDigits">Digits</th>
-        <th data-i18n="colKode">Afhentningskode</th>
-  <th data-i18n="colProvider">Provider</th>
+        <th data-i18n="colProvider">Provider</th>
+        <th class="separator-right" data-i18n="colDigits">Digits</th>
+        <th class="after-separator" data-i18n="colKode">Afhentningskode</th>
   <th data-i18n="colCollectionActions">Collection</th>
         <th data-i18n="colCountdown">Countdown</th>
       </tr>
@@ -107,9 +111,9 @@ async function loadEntries() {
 
     tr.innerHTML = `
       <td class="live-number">${row.ticket_number ?? ''}</td>
-      <td class="live-last4">${row.digits}</td>
-      <td class="live-code">${row.kode ?? ''}</td>
       <td class="live-provider">${row.provider}</td>
+      <td class="live-last4 separator-right">${row.digits}</td>
+      <td class="live-code after-separator">${row.kode ?? ''}</td>
       <td class="live-actions">
         <button onclick="deliveredEntry(${row.id})">${delivered}</button>
         <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
