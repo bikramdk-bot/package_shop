@@ -266,6 +266,7 @@
         <div id="qrHelp" class="helper" data-i18n="scanQrHelp">Hold QR-koden i rammen</div>
         <div id="qrError" class="msg error" style="display:none;"></div>
         <div class="actions">
+          <button id="switchQrBtn" class="btn btn-ghost" onclick="switchQrCamera()">Switch Camera</button>
           <button class="btn btn-ghost" onclick="closeQrScanner()" data-i18n="back">Tilbage</button>
         </div>
       </div>
@@ -969,6 +970,18 @@
     let qrScanActive = false;       // BarcodeDetector loop flag
     let zxingReader = null;         // ZXing reader instance (fallback)
     let zxingActive = false;        // ZXing active flag
+    const QR_CAMERA_PREF_KEY = 'customer.qrFacingMode';
+    let qrFacingMode = 'user';      // Preferred camera for QR scanning
+    function loadQrFacingModePreference() {
+      try {
+        const saved = localStorage.getItem(QR_CAMERA_PREF_KEY);
+        if (saved === 'user' || saved === 'environment') return saved;
+      } catch {}
+      return 'user';
+    }
+    function saveQrFacingModePreference(mode) {
+      try { localStorage.setItem(QR_CAMERA_PREF_KEY, mode); } catch {}
+    }
     async function ensureZxingLoaded() {
       if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return true;
       return new Promise((resolve, reject) => {
@@ -984,6 +997,7 @@
       // only allow if provider is selected and we start with 4-digit flow
       if (!selectedProvider) return;
       try {
+        qrFacingMode = loadQrFacingModePreference();
         document.getElementById('qrOverlay').classList.add('show');
         document.getElementById('qrError').style.display='none';
         await startQrScanner();
@@ -998,7 +1012,7 @@
       // Prefer native BarcodeDetector when available
       if ('BarcodeDetector' in window) {
         try {
-          const constraints = { video: { facingMode: 'user' } };
+          const constraints = { video: { facingMode: qrFacingMode } };
           qrStream = await navigator.mediaDevices.getUserMedia(constraints);
           video.srcObject = qrStream;
           await video.play();
@@ -1019,9 +1033,11 @@
         const devices = await zxingReader.listVideoInputDevices();
         let deviceId = undefined;
         if (devices && devices.length) {
-          // Prefer front/user camera when available
-          const front = devices.find(d => /front|user|face|facetime/i.test(d.label));
-          deviceId = (front && front.deviceId) || devices[0].deviceId;
+          const preferredPattern = qrFacingMode === 'user'
+            ? /front|user|face|facetime/i
+            : /back|rear|environment|world/i;
+          const preferred = devices.find(d => preferredPattern.test(d.label));
+          deviceId = (preferred && preferred.deviceId) || devices[0].deviceId;
         }
         zxingActive = true;
         zxingReader.decodeFromVideoDevice(deviceId, 'qrVideo', async (result, err, controls) => {
@@ -1074,7 +1090,20 @@
       await new Promise(r=>setTimeout(r, 50));
       handleSubmit();
     }
-    async function closeQrScanner() {
+    async function switchQrCamera() {
+      const err = document.getElementById('qrError');
+      qrFacingMode = qrFacingMode === 'user' ? 'environment' : 'user';
+      saveQrFacingModePreference(qrFacingMode);
+      try {
+        await closeQrScanner(false);
+        err.style.display = 'none';
+        await startQrScanner();
+      } catch (e) {
+        err.textContent = (i18n?.[currentLang]?.cameraError) || 'Could not access camera.';
+        err.style.display = 'block';
+      }
+    }
+    async function closeQrScanner(hideOverlay = true) {
       try {
         // Stop BarcodeDetector path
         qrScanActive = false;
@@ -1084,14 +1113,16 @@
         if (zxingReader) { try { zxingReader.reset(); } catch {} zxingReader = null; }
         zxingActive = false;
       } finally {
-        document.getElementById('qrOverlay').classList.remove('show');
+        if (hideOverlay) document.getElementById('qrOverlay').classList.remove('show');
       }
     }
 
     // Navigate to start/home
-    function goHome() {
-      // Navigate to the customer start flow showing all providers
-      try { window.location.href = '/customer'; } catch { window.location.assign('/customer'); }
+    async function goHome() {
+      // Reset the customer flow in-place so browser-held camera state survives for the next customer.
+      try { await closeQrScanner(); } catch {}
+      try { closeKode(); } catch {}
+      finishSession();
     }
 
     // Bridge the hidden input's events to our current key handler
