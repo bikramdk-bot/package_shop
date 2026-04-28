@@ -121,6 +121,35 @@
     .btn-ghost { background: #eef2ff; color: #1f2937; }
     .btn-icon { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 16px; }
     .icon { width: 18px; height: 18px; display: inline-block; }
+    .virtual-keypad {
+      display: none;
+      grid-template-columns: repeat(3, minmax(72px, 110px));
+      gap: 10px;
+      justify-content: center;
+      margin-top: 14px;
+    }
+    .virtual-keypad.show { display: grid; }
+    .vk-spacer { visibility: hidden; pointer-events: none; }
+    .vk-key {
+      min-height: 64px;
+      border: 0;
+      border-radius: 16px;
+      background: #f8fafc;
+      color: #111827;
+      box-shadow: inset 0 0 0 2px #dbe4f0;
+      font-size: 26px;
+      font-weight: 800;
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      touch-action: manipulation;
+    }
+    .vk-key:active { transform: scale(0.98); }
+    .vk-key.action {
+      background: #e0f2fe;
+      color: #0f172a;
+      font-size: 22px;
+    }
     .btn-success {
       background: rgba(16,185,129,1);
       color: #fff;
@@ -177,6 +206,13 @@
 
     @media (max-width: 680px) {
       .providers { grid-template-columns: repeat(2, 1fr); }
+      .virtual-keypad {
+        grid-template-columns: repeat(3, minmax(68px, 1fr));
+        width: min(100%, 340px);
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .vk-key { min-height: 60px; font-size: 24px; }
     }
   </style>
 </head>
@@ -222,15 +258,17 @@
                 <button id="clearBtn" class="btn btn-ghost" style="display:none" onclick="clearInput()" data-i18n="clear">Ryd</button>
                 <button id="submitBtn" class="btn btn-primary" style="display:none" onclick="handleSubmit()" data-i18n="continue">Fortsæt</button>
               </div>
+              <div id="virtualKeypad" class="virtual-keypad" aria-label="Numeric keypad"></div>
             </div>
           </div>
           <!-- Soft keyboard input used to request a numeric keypad on mobile browsers -->
           <input
             id="softKeyboardInput"
             class="soft-kb-input"
-            type="tel"
+              type="text"
             inputmode="numeric"
             pattern="[0-9]*"
+              maxlength="12"
             enterkeyhint="done"
             autocomplete="off"
             autocapitalize="none"
@@ -278,6 +316,7 @@
     <div class="modal">
       <h3 id="kodeTitle" data-i18n="daoTitle">DAO: Indtast 5-cifret afhentningskode</h3>
       <div id="kodeBoxes" class="boxes"></div>
+      <div id="kodeKeypad" class="virtual-keypad" aria-label="Numeric keypad"></div>
       <div class="actions">
         <button class="btn btn-ghost" onclick="closeKode()" data-i18n="back">Tilbage</button>
   <button id="kodeSubmitBtn" class="btn btn-primary" onclick="submitCustomerEntryWithKode()" data-i18n="submit">Indsend</button>
@@ -347,6 +386,12 @@
     let sessionId = null; // generated only when customer finishes (No, finish)
     let entryIds = []; // accumulate entry IDs for this session
     let kodeTargetLen = 5;
+    const useCustomKeypad = (() => {
+      const ua = navigator.userAgent || '';
+      const platform = navigator.platform || '';
+      const touchPoints = navigator.maxTouchPoints || 0;
+      return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && touchPoints > 1);
+    })();
     // QR-driven auto-escalation
     let qrRawCode = null; // full scanned QR string (raw)
     let isQrAuto = false; // when true, handleSubmit will auto-advance using qrSessionDigits
@@ -543,6 +588,7 @@
       if (autoSubmitTimer) { clearTimeout(autoSubmitTimer); autoSubmitTimer = null; }
       // keep soft keyboard visible if possible
       focusSoftKeyboard();
+      updateVirtualKeypadVisibility();
     }
 
     // Auto-submit debounce timer (ms)
@@ -583,6 +629,7 @@
     }
     // Focus the hidden input to trigger mobile soft keyboard (Android Chrome)
     function focusSoftKeyboard() {
+      if (useCustomKeypad) return;
       const el = document.getElementById('softKeyboardInput');
       if (!el) return;
       try {
@@ -596,6 +643,52 @@
       } catch {}
     }
     function clearInput() { inputDigits=''; renderInputBoxes(targetLen); document.getElementById('message').textContent=''; }
+
+    function updateVirtualKeypadVisibility() {
+      const kodeOpen = document.getElementById('kodeOverlay')?.classList.contains('show');
+      const mainKeypad = document.getElementById('virtualKeypad');
+      const kodeKeypad = document.getElementById('kodeKeypad');
+      if (mainKeypad) {
+        mainKeypad.classList.toggle('show', !!(useCustomKeypad && selectedProvider && targetLen > 0 && !kodeOpen));
+      }
+      if (kodeKeypad) {
+        kodeKeypad.classList.toggle('show', !!(useCustomKeypad && kodeOpen));
+      }
+      if (useCustomKeypad) hideSoftKeyboard();
+    }
+
+    function pressVirtualKey(key) {
+      const currentHandler = typeof activeKeyHandler === 'function' ? activeKeyHandler : handleKey;
+      if (key === 'spacer') return;
+      if (key === 'backspace') {
+        currentHandler({ key: 'Backspace' });
+        return;
+      }
+      currentHandler({ key });
+    }
+
+    function buildVirtualKeypad(containerId) {
+      const wrap = document.getElementById(containerId);
+      if (!wrap) return;
+      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'spacer', '0', 'backspace'];
+      wrap.innerHTML = '';
+      keys.forEach((key) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        if (key === 'spacer') {
+          btn.className = 'vk-spacer';
+          btn.setAttribute('aria-hidden', 'true');
+          btn.tabIndex = -1;
+        } else {
+          btn.className = 'vk-key' + (key === 'backspace' ? ' action' : '');
+          btn.dataset.key = key;
+          btn.setAttribute('aria-label', key === 'backspace' ? 'Backspace' : `Digit ${key}`);
+          btn.textContent = key === 'backspace' ? '⌫' : key;
+          btn.addEventListener('click', () => pressVirtualKey(key));
+        }
+        wrap.appendChild(btn);
+      });
+    }
 
     // --- Flow handlers ---
     async function handleSubmit() {
@@ -794,10 +887,12 @@
       wrap.innerHTML = '';
       for (let i=0;i<count;i++) {
         const b = document.createElement('div');
+      updateVirtualKeypadVisibility();
         b.className = 'box' + (i === kodeDigits.length ? ' active' : '');
         b.textContent = kodeDigits[i] || '';
         wrap.appendChild(b);
       }
+      updateVirtualKeypadVisibility();
     }
     function handleKodeKey(e) {
       const msg = document.getElementById('kodeMsg');
@@ -962,6 +1057,7 @@
       if (submitBtn) submitBtn.style.display = 'none';
       // Hide keyboard until a provider is chosen in the new session
       hideSoftKeyboard();
+      updateVirtualKeypadVisibility();
     }
 
     // --- QR Scanner ---
@@ -1131,11 +1227,11 @@
       if (!el) return;
       const currentHandler = () => (typeof activeKeyHandler === 'function' ? activeKeyHandler : handleKey);
       el.addEventListener('input', (e) => {
-        const v = e.target.value || '';
+        const v = (e.target.value || '').replace(/\D/g, '');
         e.target.value = '';
         e.stopPropagation();
         for (const ch of v) {
-          if (/^[0-9]$/.test(ch)) currentHandler()({ key: ch });
+          currentHandler()({ key: ch });
         }
       });
       el.addEventListener('keydown', (e) => {
@@ -1158,6 +1254,9 @@
       await loadTranslations();
       await loadProviderSettings();
       renderProviders();
+      buildVirtualKeypad('virtualKeypad');
+      buildVirtualKeypad('kodeKeypad');
+      updateVirtualKeypadVisibility();
       // ensure flags reflect current language
       updateLanguage(currentLang);
       // set up hidden input bridge for Android soft keyboard
