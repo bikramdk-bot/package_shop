@@ -212,7 +212,7 @@
           <div class="input-row">
             <div id="prompt" class="prompt" data-i18n="prompt"></div>
             <div>
-              <div id="boxes" class="boxes" aria-live="polite" style="margin-bottom: 6px;"></div>
+              <div id="boxes" class="boxes" aria-live="polite" style="margin-bottom: 6px;" onclick="focusSoftKeyboard()"></div>
               <div id="message" class="msg"></div>
               <div class="actions">
                 <button id="scanQrBtn" class="btn btn-ghost btn-icon" style="display:none" onclick="openQrScanner()">
@@ -224,14 +224,15 @@
               </div>
             </div>
           </div>
-          <!-- Hidden-but-focusable input to open Android soft keyboard -->
+          <!-- Soft keyboard input used to request a numeric keypad on mobile browsers -->
           <input
             id="softKeyboardInput"
             class="soft-kb-input"
-            type="text"
+            type="tel"
             inputmode="numeric"
             pattern="[0-9]*"
-            autocomplete="one-time-code"
+            enterkeyhint="done"
+            autocomplete="off"
             autocapitalize="none"
             autocorrect="off"
             aria-hidden="true"
@@ -997,7 +998,7 @@
       // Prefer native BarcodeDetector when available
       if ('BarcodeDetector' in window) {
         try {
-          const constraints = { video: { facingMode: 'environment' } };
+          const constraints = { video: { facingMode: 'user' } };
           qrStream = await navigator.mediaDevices.getUserMedia(constraints);
           video.srcObject = qrStream;
           await video.play();
@@ -1018,9 +1019,9 @@
         const devices = await zxingReader.listVideoInputDevices();
         let deviceId = undefined;
         if (devices && devices.length) {
-          // Prefer back/environment camera when available
-          const back = devices.find(d => /back|rear|environment/i.test(d.label));
-          deviceId = (back && back.deviceId) || devices[0].deviceId;
+          // Prefer front/user camera when available
+          const front = devices.find(d => /front|user|face|facetime/i.test(d.label));
+          deviceId = (front && front.deviceId) || devices[0].deviceId;
         }
         zxingActive = true;
         zxingReader.decodeFromVideoDevice(deviceId, 'qrVideo', async (result, err, controls) => {
