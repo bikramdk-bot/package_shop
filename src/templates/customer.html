@@ -525,6 +525,65 @@
         // No instructional text needed per new spec
     }
 
+    function resetParcelEntryUi({ clearEntries = false } = {}) {
+      selectedProvider = null;
+      inputDigits = '';
+      lastLookupCount = 0;
+      targetLen = 0;
+      kodeDigits = '';
+      kodeTargetLen = 5;
+
+      if (clearEntries) {
+        sessionId = null;
+        entryIds = [];
+      }
+
+      document.querySelectorAll('.provider').forEach(el => {
+        el.classList.remove('selected');
+        el.classList.remove('dim');
+      });
+
+      const boxes = document.getElementById('boxes');
+      if (boxes) boxes.innerHTML = '';
+
+      const prompt = document.getElementById('prompt');
+      if (prompt) {
+        prompt.textContent = '';
+        prompt.style.display = 'none';
+      }
+
+      const helper = document.getElementById('helper');
+      if (helper) helper.textContent = '';
+
+      const message = document.getElementById('message');
+      if (message) {
+        message.className = 'msg';
+        message.textContent = '';
+      }
+
+      const qrBtn = document.getElementById('scanQrBtn');
+      if (qrBtn) qrBtn.style.display = 'none';
+
+      const clearBtn = document.getElementById('clearBtn');
+      if (clearBtn) clearBtn.style.display = 'none';
+
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.style.display = 'none';
+
+      if (autoSubmitTimer) {
+        clearTimeout(autoSubmitTimer);
+        autoSubmitTimer = null;
+      }
+      if (kodeAutoTimer) {
+        clearTimeout(kodeAutoTimer);
+        kodeAutoTimer = null;
+      }
+
+      activeKeyHandler = handleKey;
+      hideSoftKeyboard();
+      updateVirtualKeypadVisibility();
+    }
+
     // --- Digit boxes ---
     let activeKeyHandler = null; // will point to handleKey or handleKodeKey depending on context
     function globalKeydown(e) {
@@ -830,24 +889,24 @@
       document.getElementById('kodeOverlay').classList.add('show');
       activeKeyHandler = handleKodeKey; // redirect key events to kode modal
       document.getElementById('kodeMsg').textContent = '';
+      updateVirtualKeypadVisibility();
       // ensure keyboard is up for kode entry
       focusSoftKeyboard();
     }
     function closeKode() {
       document.getElementById('kodeOverlay').classList.remove('show');
       activeKeyHandler = handleKey;
+      updateVirtualKeypadVisibility();
     }
     function renderKodeBoxes(count) {
       const wrap = document.getElementById('kodeBoxes');
       wrap.innerHTML = '';
       for (let i=0;i<count;i++) {
         const b = document.createElement('div');
-      updateVirtualKeypadVisibility();
         b.className = 'box' + (i === kodeDigits.length ? ' active' : '');
         b.textContent = kodeDigits[i] || '';
         wrap.appendChild(b);
       }
-      updateVirtualKeypadVisibility();
     }
     function handleKodeKey(e) {
       const msg = document.getElementById('kodeMsg');
@@ -881,19 +940,7 @@
     function nextParcel() {
       document.getElementById('doneOverlay').classList.remove('show');
       clearQrSession();
-      inputDigits=''; lastLookupCount=0; // keep provider
-      renderInputBoxes(targetLen);
-      document.getElementById('message').textContent = '';
-      const qrBtn = document.getElementById('scanQrBtn');
-      if (qrBtn) {
-        const showQr = selectedProvider && providerAsksLast4() && targetLen === 4;
-        qrBtn.style.display = showQr ? '' : 'none';
-      }
-      // restore all providers to bright again
-      document.querySelectorAll('.provider').forEach(el => el.classList.remove('dim'));
-      setTimeout(()=>focusActiveBox(), 50);
-      // Do not show keyboard until a provider is chosen
-      hideSoftKeyboard();
+      resetParcelEntryUi();
     }
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
@@ -989,11 +1036,7 @@
       document.getElementById('doneOverlay').classList.remove('show');
       // reset everything
       clearQrSession();
-      selectedProvider = null; inputDigits=''; lastLookupCount=0; targetLen=0; sessionId=null; entryIds=[];
-      document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('selected'));
-      document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('dim'));
-      document.getElementById('boxes').innerHTML='';
-      document.getElementById('helper').textContent='';
+      resetParcelEntryUi({ clearEntries: true });
       // keep prompt hidden per new spec
       // Reset modal UI to initial state for next time
       const yesBtn = document.getElementById('yesBtn');
@@ -1012,9 +1055,6 @@
       if (clearBtn) clearBtn.style.display = 'none';
       const submitBtn = document.getElementById('submitBtn');
       if (submitBtn) submitBtn.style.display = 'none';
-      // Hide keyboard until a provider is chosen in the new session
-      hideSoftKeyboard();
-      updateVirtualKeypadVisibility();
     }
 
     // --- QR Scanner ---

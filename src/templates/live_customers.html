@@ -31,22 +31,26 @@
   th { background: #eef2ff; font-size: 0.95rem; }
   tbody td { font-size: 1.15rem; font-weight: 600; line-height: 1.1; }
   .standard-table th, .standard-table td { padding: 8px 6px; }
-  .standard-table th { font-size: 0.82rem; }
-  .standard-table tbody td { font-size: 0.92rem; }
+  .standard-table th { font-size: 1.02rem; }
+  .standard-table tbody td { font-size: 1.15rem; }
   .standard-table tbody td { white-space: nowrap; }
   tbody td.live-last4 { font-weight: 800; }
-  tbody td.live-actions { font-size: 1rem; font-weight: 400; }
+  tbody td.live-actions { font-size: 1.25rem; font-weight: 400; }
   tbody td.live-actions button,
-  tbody td.live-countdown button { font-size: 1rem; }
-  .standard-table .live-number { width: 72px; }
-  .standard-table .live-provider { width: 110px; }
-  .standard-table .live-last4 { width: 96px; font-size: 1.16rem; }
-  .standard-table .live-code { width: 110px; }
+  tbody td.live-countdown button { font-size: 1.25rem; }
+  .standard-table .live-number { width: 160px; }
+  .standard-table .live-provider { width: 325px; }
+    .standard-table .live-last4 { width: 220px; font-size: 3rem; }
+  .standard-table .live-code { width: 125px; }
   .standard-table .live-actions { width: 170px; }
   .standard-table .live-countdown { width: 96px; }
+  .standard-table td.live-number,
+  .standard-table td.live-provider,
+  .standard-table td.live-last4,
+    .standard-table td.live-code { font-size: 3rem; }
   .standard-table .live-actions .action-group { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-  .standard-table .live-actions button { font-size: 0.82rem; padding: 6px 7px; }
-  .standard-table .live-countdown { font-size: 0.88rem; }
+  .standard-table .live-actions button { font-size: 1.02rem; padding: 7px 9px; }
+  .standard-table .live-countdown { font-size: 1.1rem; }
   .countdown { font-weight: bold; }
   .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
   .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
@@ -64,14 +68,14 @@
     background: linear-gradient(180deg, #ffffff, #f8fbff);
   }
   .qr-card-main { display: grid; gap: 8px; }
-  .qr-ticket { font-size: 1.25rem; font-weight: 800; }
+  .qr-ticket { font-size: 1.56rem; font-weight: 800; }
   .qr-provider-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .qr-provider { font-size: 1rem; color: #334155; }
-  .qr-primary { font-size: 2rem; font-weight: 900; }
-  .qr-secondary { font-size: 0.95rem; font-weight: 600; color: #475569; }
+  .qr-provider { font-size: 1.25rem; color: #334155; }
+  .qr-primary { font-size: 2.5rem; font-weight: 900; }
+  .qr-secondary { font-size: 1.18rem; font-weight: 600; color: #475569; }
   .qr-code-wrap { display: grid; justify-items: center; gap: 8px; }
   .qr-code-wrap img { width: 132px; height: 132px; object-fit: contain; background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 6px; }
-  .qr-caption { font-size: 0.82rem; font-weight: 500; color: #475569; word-break: break-all; text-align: center; }
+  .qr-caption { font-size: 1.02rem; font-weight: 500; color: #475569; word-break: break-all; text-align: center; }
   .qr-actions { display: grid; gap: 10px; justify-items: stretch; }
   .qr-actions button { width: 100%; }
   .qr-timer {
@@ -83,7 +87,7 @@
     border-radius: 14px;
     background: #fff;
   }
-  .qr-timer-head { font-size: 0.85rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+  .qr-timer-head { font-size: 1.05rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
   .empty-state { padding: 18px 12px; color: #64748b; font-size: 1rem; text-align: center; }
   #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
   #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
@@ -94,20 +98,31 @@
     body { margin: 10px; }
     .queue-stack { gap: 18px; }
     .queue-section { padding: 12px; }
-    .queue-header h3 { font-size: 1.05rem; }
-    .queue-meta { font-size: 0.82rem; }
+    .queue-header h3 { font-size: 1.2rem; }
+    .queue-meta { font-size: 0.95rem; }
     .standard-table th, .standard-table td { padding: 7px 4px; }
-    .standard-table th { font-size: 0.74rem; }
-    .standard-table tbody td { font-size: 0.78rem; }
-    .standard-table .live-number { width: 62px; }
-    .standard-table .live-provider { width: 92px; }
-    .standard-table .live-last4 { width: 78px; font-size: 0.96rem; }
-    .standard-table .live-code { width: 90px; }
+    .standard-table th { font-size: 0.92rem; }
+    .standard-table tbody td { font-size: 0.98rem; }
+    .standard-table .live-number { width: 120px; }
+    .standard-table .live-provider { width: 247px; }
+    .standard-table .live-last4 { width: 160px; font-size: 2.9rem; }
+    .standard-table .live-code { width: 95px; }
     .standard-table .live-actions { width: 146px; }
     .standard-table .live-countdown { width: 82px; }
+    .standard-table td.live-number,
+    .standard-table td.live-provider,
+    .standard-table td.live-last4,
+    .standard-table td.live-code { font-size: 2.9rem; }
     .standard-table .live-actions .action-group { gap: 4px; }
     .standard-table .live-actions button { font-size: 0.72rem; padding: 5px 4px; }
     .standard-table .live-countdown button { font-size: 0.82rem; }
+    .standard-table .live-countdown { font-size: 0.88rem; }
+    .qr-ticket { font-size: 1.36rem; }
+    .qr-provider { font-size: 1.08rem; }
+    .qr-primary { font-size: 2.15rem; }
+    .qr-secondary { font-size: 1rem; }
+    .qr-caption { font-size: 0.92rem; }
+    .qr-timer-head { font-size: 0.92rem; }
   }
 
   @media (max-width: 680px) {
@@ -195,6 +210,10 @@
 let i18n = null;
 let currentLang = 'da';
 
+function formatLiveProviderName(provider) {
+  return /^post\s*nord$/i.test(provider || '') ? 'PostN' : provider;
+}
+
 function getRemainingSeconds(row) {
   const createdAt = new Date(row.created_at);
   const elapsed = (new Date() - createdAt) / 1000;
@@ -245,11 +264,12 @@ function buildStandardRow(row) {
   const color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
   const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
   const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
+  const providerName = formatLiveProviderName(row.provider);
   const tr = document.createElement('tr');
   applyFinalizedColor(tr, row);
   tr.innerHTML = `
     <td class="live-number">${row.ticket_number ?? ''}</td>
-    <td class="live-provider">${row.provider}</td>
+    <td class="live-provider">${providerName}</td>
     <td class="live-last4">${row.digits}</td>
     <td class="live-code">${row.kode ?? ''}</td>
     <td class="live-actions">
@@ -267,6 +287,7 @@ function buildQrRow(row) {
   const remaining = getRemainingSeconds(row);
   const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
   const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
+  const providerName = formatLiveProviderName(row.provider);
   const card = document.createElement('article');
   card.className = 'qr-clash-card';
   applyFinalizedColor(card, row);
@@ -275,7 +296,7 @@ function buildQrRow(row) {
     <div class="qr-card-main">
       <div class="qr-ticket">Customer ${row.ticket_number ?? ''}</div>
       <div class="qr-provider-line">
-        <span class="qr-provider">${row.provider}</span>
+        <span class="qr-provider">${providerName}</span>
         <span class="qr-secondary">${row.kode ? `Code ${row.kode}` : 'QR clash'}</span>
       </div>
       <div class="qr-primary">${row.digits}</div>
