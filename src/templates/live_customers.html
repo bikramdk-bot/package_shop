@@ -30,19 +30,23 @@
   th, td { border: 1px solid #dbe4f0; padding: 10px 12px; text-align: center; vertical-align: middle; }
   th { background: #eef2ff; font-size: 0.95rem; }
   tbody td { font-size: 1.15rem; font-weight: 600; line-height: 1.1; }
+  .standard-table th, .standard-table td { padding: 8px 6px; }
+  .standard-table th { font-size: 0.82rem; }
+  .standard-table tbody td { font-size: 0.92rem; }
   .standard-table tbody td { white-space: nowrap; }
   tbody td.live-last4 { font-weight: 800; }
   tbody td.live-actions { font-size: 1rem; font-weight: 400; }
   tbody td.live-actions button,
   tbody td.live-countdown button { font-size: 1rem; }
-  .standard-table .live-number { width: 100px; }
-  .standard-table .live-provider { width: 150px; }
-  .standard-table .live-last4 { width: 120px; font-size: 1.45rem; }
-  .standard-table .live-code { width: 150px; }
-  .standard-table .live-actions { width: 240px; }
-  .standard-table .live-countdown { width: 170px; }
+  .standard-table .live-number { width: 72px; }
+  .standard-table .live-provider { width: 110px; }
+  .standard-table .live-last4 { width: 96px; font-size: 1.16rem; }
+  .standard-table .live-code { width: 110px; }
+  .standard-table .live-actions { width: 170px; }
+  .standard-table .live-countdown { width: 96px; }
   .standard-table .live-actions .action-group { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-  .standard-table .live-countdown { font-size: 1rem; }
+  .standard-table .live-actions button { font-size: 0.82rem; padding: 6px 7px; }
+  .standard-table .live-countdown { font-size: 0.88rem; }
   .countdown { font-weight: bold; }
   .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
   .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
@@ -86,7 +90,27 @@
   #licenseBlocker p { margin: 0; color: #374151; }
   #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
   #licenseBlocker a.btn:hover { background: #d97706; }
-  @media (max-width: 980px) {
+  @media (max-width: 1024px) and (orientation: portrait) {
+    body { margin: 10px; }
+    .queue-stack { gap: 18px; }
+    .queue-section { padding: 12px; }
+    .queue-header h3 { font-size: 1.05rem; }
+    .queue-meta { font-size: 0.82rem; }
+    .standard-table th, .standard-table td { padding: 7px 4px; }
+    .standard-table th { font-size: 0.74rem; }
+    .standard-table tbody td { font-size: 0.78rem; }
+    .standard-table .live-number { width: 62px; }
+    .standard-table .live-provider { width: 92px; }
+    .standard-table .live-last4 { width: 78px; font-size: 0.96rem; }
+    .standard-table .live-code { width: 90px; }
+    .standard-table .live-actions { width: 146px; }
+    .standard-table .live-countdown { width: 82px; }
+    .standard-table .live-actions .action-group { gap: 4px; }
+    .standard-table .live-actions button { font-size: 0.72rem; padding: 5px 4px; }
+    .standard-table .live-countdown button { font-size: 0.82rem; }
+  }
+
+  @media (max-width: 680px) {
     body { margin: 12px; }
     .queue-section { padding: 12px; }
     .standard-table, .standard-table thead, .standard-table tbody, .standard-table th, .standard-table td, .standard-table tr { display: block; }

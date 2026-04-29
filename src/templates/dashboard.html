@@ -260,7 +260,7 @@
             <td>${candidate.digits}</td>
             <td>${candidate.barcode || ''}</td>
             <td>${entryDateStr}</td>
-            <td><button onclick="deleteParcel(${candidate.id})">🗑️ Delete</button></td>
+            <td><button onclick="deleteParcel(${candidate.id}, ${entry.id})">🗑️ Delete</button></td>
           </tr>
         `;
       }).join('') : '';
@@ -306,12 +306,16 @@
     loadParcels();
   }
 
-  async function deleteParcel(id) {
+  async function deleteParcel(id, clashEntryId = null) {
     if (!id && id !== 0) return;
+    const body = {id};
+    if (clashEntryId !== null && clashEntryId !== undefined) {
+      body.clash_entry_id = clashEntryId;
+    }
     await fetch('/delete_parcel', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id})
+      body: JSON.stringify(body)
     });
     loadParcels();
   }

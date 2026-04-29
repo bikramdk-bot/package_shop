@@ -1944,6 +1944,13 @@ def delete_parcel_api():
     except Exception:
         return jsonify({"error": "Missing or invalid id"}), 400
 
+    clash_entry_id = data.get("clash_entry_id")
+    if clash_entry_id is not None:
+        try:
+            clash_entry_id = int(clash_entry_id)
+        except Exception:
+            return jsonify({"error": "Invalid clash_entry_id"}), 400
+
     conn = open_db()
     cursor = conn.cursor()
     cursor.execute(
@@ -1953,6 +1960,14 @@ def delete_parcel_api():
         """,
         (row_id,),
     )
+    if clash_entry_id is not None:
+        cursor.execute(
+            """
+            DELETE FROM customer_entries
+            WHERE id = ? AND COALESCE(entry_kind, 'standard') = 'qr_clash'
+            """,
+            (clash_entry_id,),
+        )
     conn.commit()
     conn.close()
     return jsonify({"message": "Packet deleted."})
