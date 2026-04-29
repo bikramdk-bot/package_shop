@@ -25,7 +25,13 @@
     background: linear-gradient(90deg, #0f172a, #1d4ed8, #0f172a);
     opacity: 0.15;
   }
-  .standard-table { table-layout: fixed; }
+  .standard-table { table-layout: fixed; width: 845px; max-width: 100%; }
+  .standard-table col.live-number { width: 64px; }
+  .standard-table col.live-provider { width: 195px; }
+  .standard-table col.live-last4 { width: 176px; }
+  .standard-table col.live-code { width: 144px; }
+  .standard-table col.live-actions { width: 170px; }
+  .standard-table col.live-countdown { width: 96px; }
   table { border-collapse: collapse; width: 100%; background: #fff; }
   th, td { border: 1px solid #dbe4f0; padding: 10px 12px; text-align: center; vertical-align: middle; }
   th { background: #eef2ff; font-size: 0.95rem; }
@@ -38,12 +44,7 @@
   tbody td.live-actions { font-size: 1.25rem; font-weight: 400; }
   tbody td.live-actions button,
   tbody td.live-countdown button { font-size: 1.25rem; }
-  .standard-table .live-number { width: 160px; }
-  .standard-table .live-provider { width: 325px; }
-    .standard-table .live-last4 { width: 220px; font-size: 3rem; }
-  .standard-table .live-code { width: 125px; }
-  .standard-table .live-actions { width: 170px; }
-  .standard-table .live-countdown { width: 96px; }
+    .standard-table .live-last4 { font-size: 3rem; }
   .standard-table td.live-number,
   .standard-table td.live-provider,
   .standard-table td.live-last4,
@@ -100,15 +101,17 @@
     .queue-section { padding: 12px; }
     .queue-header h3 { font-size: 1.2rem; }
     .queue-meta { font-size: 0.95rem; }
+    .standard-table { width: 661px; }
     .standard-table th, .standard-table td { padding: 7px 4px; }
     .standard-table th { font-size: 0.92rem; }
     .standard-table tbody td { font-size: 0.98rem; }
-    .standard-table .live-number { width: 120px; }
-    .standard-table .live-provider { width: 247px; }
-    .standard-table .live-last4 { width: 160px; font-size: 2.9rem; }
-    .standard-table .live-code { width: 95px; }
-    .standard-table .live-actions { width: 146px; }
-    .standard-table .live-countdown { width: 82px; }
+    .standard-table col.live-number { width: 48px; }
+    .standard-table col.live-provider { width: 148px; }
+    .standard-table col.live-last4 { width: 128px; }
+    .standard-table col.live-code { width: 109px; }
+    .standard-table col.live-actions { width: 146px; }
+    .standard-table col.live-countdown { width: 82px; }
+    .standard-table .live-last4 { font-size: 2.9rem; }
     .standard-table td.live-number,
     .standard-table td.live-provider,
     .standard-table td.live-last4,
@@ -179,6 +182,14 @@
         <div class="queue-meta" id="normalMeta"></div>
       </div>
       <table id="normalTable" class="standard-table">
+        <colgroup>
+          <col class="live-number">
+          <col class="live-provider">
+          <col class="live-last4">
+          <col class="live-code">
+          <col class="live-actions">
+          <col class="live-countdown">
+        </colgroup>
         <thead>
           <tr>
             <th data-i18n="assignCustomerNumber">Customer Number</th>
