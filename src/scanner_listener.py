@@ -48,8 +48,15 @@ SHIFT_CODES = {42, 54}  # left/right shift
 
 def process_barcode(code: str) -> str:
     code = code.strip().upper()
-    digits = re.sub(r"\D+", "", code)
-    return digits[:4]
+    if len(code) >= 4 and code[-2:].isdigit():
+        return code[-4:]
+    # If the last two characters are alphabetic (e.g. country/provider code),
+    # treat the four characters before them as the digits to return.
+    if len(code) >= 6 and re.fullmatch(r"[A-Z]{2}", code[-2:]):
+        return code[-6:-2]
+    if len(code) >= 11 and code[-1].isalpha() and code[-2].isdigit():
+        return code[-11:-7]
+    return code[-4:]
 
 
 def is_lcn(s: str) -> bool:
