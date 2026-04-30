@@ -12,13 +12,13 @@ def menu():
 
 def manual_add():
     provider = input("Enter provider (PostNord/DAO/UPS/DHL): ").strip()
-    digits = input("Enter last 4 digits: ").strip()
+    digits = input("Enter 4 digits: ").strip()
     insert_parcel(provider, digits)
 
 
 def manual_search():
     provider = input("Enter provider (PostNord/DAO/UPS/DHL): ").strip()
-    digits = input("Enter last 4 digits: ").strip()
+    digits = input("Enter 4 digits: ").strip()
     results = search_parcel(provider, digits)
     if results:
         print(f"\n✅ Found {len(results)} result(s):")

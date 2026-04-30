@@ -37,6 +37,8 @@ for name in ('shop_info.json', 'license.json'):
         datas.append((str(p), '.'))
 
 hiddenimports = collect_submodules('encodings')
+hiddenimports += collect_submodules('qrcode')
+hiddenimports += collect_submodules('qrcode.image')
 
 # ---------------- API SERVER BUILD ----------------
 a = Analysis(

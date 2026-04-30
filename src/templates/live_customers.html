@@ -5,30 +5,150 @@
 <title data-i18n="liveCustomersTitle">Live Customer Entries</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-  body { font-family: sans-serif; margin: 20px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-  th { background: #f0f0f0; }
-  #table th.separator-right,
-  #table td.separator-right { border-right: 8px solid #4b5563; }
-  #table th.after-separator,
-  #table td.after-separator { border-left: 0; }
-  #table tbody td { font-size: 2rem; font-weight: 600; line-height: 1.1; }
-  #table tbody td.live-last4 { font-weight: 800; }
-  #table tbody td.live-actions { font-size: 1rem; font-weight: 400; }
-  #table tbody td.live-actions button,
-  #table tbody td.live-countdown button { font-size: 1rem; }
+  body { font-family: sans-serif; margin: 20px; background: #f8fafc; color: #111827; }
+  .page-title { margin-bottom: 12px; }
+  .queue-stack { display: grid; gap: 28px; }
+  .queue-section {
+    background: #fff;
+    border: 1px solid #dbe4f0;
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  }
+  .queue-section.hidden { display: none; }
+  .queue-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .queue-header h3 { margin: 0; font-size: 1.2rem; }
+  .queue-meta { color: #64748b; font-size: 0.95rem; }
+  .queue-divider {
+    height: 18px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #0f172a, #1d4ed8, #0f172a);
+    opacity: 0.15;
+  }
+  .standard-table { table-layout: fixed; width: 845px; max-width: 100%; }
+  .standard-table col.live-number { width: 64px; }
+  .standard-table col.live-provider { width: 195px; }
+  .standard-table col.live-last4 { width: 176px; }
+  .standard-table col.live-code { width: 144px; }
+  .standard-table col.live-actions { width: 170px; }
+  .standard-table col.live-countdown { width: 96px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid #dbe4f0; padding: 10px 12px; text-align: center; vertical-align: middle; }
+  th { background: #eef2ff; font-size: 0.95rem; }
+  tbody td { font-size: 1.15rem; font-weight: 600; line-height: 1.1; }
+  .standard-table th, .standard-table td { padding: 8px 6px; }
+  .standard-table th { font-size: 1.02rem; }
+  .standard-table tbody td { font-size: 1.15rem; }
+  .standard-table tbody td { white-space: nowrap; }
+  tbody td.live-last4 { font-weight: 800; }
+  tbody td.live-actions { font-size: 1.25rem; font-weight: 400; }
+  tbody td.live-actions button,
+  tbody td.live-countdown button { font-size: 1.25rem; }
+    .standard-table .live-last4 { font-size: 3rem; }
+  .standard-table td.live-number,
+  .standard-table td.live-provider,
+  .standard-table td.live-last4,
+    .standard-table td.live-code { font-size: 3rem; }
+  .standard-table .live-actions .action-group { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+  .standard-table .live-actions button { font-size: 1.02rem; padding: 7px 9px; }
+  .standard-table .live-countdown { font-size: 1.1rem; }
   .countdown { font-weight: bold; }
   .flags { position: fixed; bottom: 10px; right: 10px; display: flex; gap: 8px; z-index: 1000; }
   .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
   .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
   .flag img { width: 28px; height: 20px; display: block; }
-  /* License expired overlay */
+  .qr-clash-list { display: grid; gap: 16px; }
+  .qr-clash-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(140px, 180px) minmax(220px, 1fr) minmax(170px, 210px);
+    gap: 16px;
+    align-items: center;
+    border: 1px solid #dbe4f0;
+    border-radius: 18px;
+    padding: 16px 18px;
+    background: linear-gradient(180deg, #ffffff, #f8fbff);
+  }
+  .qr-card-main { display: grid; gap: 8px; }
+  .qr-ticket { font-size: 1.56rem; font-weight: 800; }
+  .qr-provider-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .qr-provider { font-size: 1.25rem; color: #334155; }
+  .qr-primary { font-size: 2.5rem; font-weight: 900; }
+  .qr-secondary { font-size: 1.18rem; font-weight: 600; color: #475569; }
+  .qr-code-wrap { display: grid; justify-items: center; gap: 8px; }
+  .qr-code-wrap img { width: 132px; height: 132px; object-fit: contain; background: #fff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 6px; }
+  .qr-caption { font-size: 1.02rem; font-weight: 500; color: #475569; word-break: break-all; text-align: center; }
+  .qr-actions { display: grid; gap: 10px; justify-items: stretch; }
+  .qr-actions button { width: 100%; }
+  .qr-timer {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    padding: 12px;
+    border: 1px solid #dbe4f0;
+    border-radius: 14px;
+    background: #fff;
+  }
+  .qr-timer-head { font-size: 1.05rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+  .empty-state { padding: 18px 12px; color: #64748b; font-size: 1rem; text-align: center; }
   #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
   #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
   #licenseBlocker p { margin: 0; color: #374151; }
   #licenseBlocker a.btn { display: inline-block; margin-top: 6px; padding: 10px 14px; background: #f59e0b; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
   #licenseBlocker a.btn:hover { background: #d97706; }
+  @media (max-width: 1024px) and (orientation: portrait) {
+    body { margin: 10px; }
+    .queue-stack { gap: 18px; }
+    .queue-section { padding: 12px; }
+    .queue-header h3 { font-size: 1.2rem; }
+    .queue-meta { font-size: 0.95rem; }
+    .standard-table { width: 661px; }
+    .standard-table th, .standard-table td { padding: 7px 4px; }
+    .standard-table th { font-size: 0.92rem; }
+    .standard-table tbody td { font-size: 0.98rem; }
+    .standard-table col.live-number { width: 48px; }
+    .standard-table col.live-provider { width: 148px; }
+    .standard-table col.live-last4 { width: 128px; }
+    .standard-table col.live-code { width: 109px; }
+    .standard-table col.live-actions { width: 146px; }
+    .standard-table col.live-countdown { width: 82px; }
+    .standard-table .live-last4 { font-size: 2.9rem; }
+    .standard-table td.live-number,
+    .standard-table td.live-provider,
+    .standard-table td.live-last4,
+    .standard-table td.live-code { font-size: 2.9rem; }
+    .standard-table .live-actions .action-group { gap: 4px; }
+    .standard-table .live-actions button { font-size: 0.72rem; padding: 5px 4px; }
+    .standard-table .live-countdown button { font-size: 0.82rem; }
+    .standard-table .live-countdown { font-size: 0.88rem; }
+    .qr-ticket { font-size: 1.36rem; }
+    .qr-provider { font-size: 1.08rem; }
+    .qr-primary { font-size: 2.15rem; }
+    .qr-secondary { font-size: 1rem; }
+    .qr-caption { font-size: 0.92rem; }
+    .qr-timer-head { font-size: 0.92rem; }
+  }
+
+  @media (max-width: 680px) {
+    body { margin: 12px; }
+    .queue-section { padding: 12px; }
+    .standard-table, .standard-table thead, .standard-table tbody, .standard-table th, .standard-table td, .standard-table tr { display: block; }
+    thead { display: none; }
+    .standard-table tr { margin-bottom: 12px; border: 1px solid #dbe4f0; border-radius: 14px; overflow: hidden; }
+    .standard-table td { display: flex; justify-content: space-between; gap: 12px; text-align: left; font-size: 1rem; white-space: normal; }
+    .standard-table td::before { font-size: 0.85rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+    .live-number::before { content: 'Number'; }
+    .live-provider::before { content: 'Provider'; }
+    .live-last4::before { content: 'Digits'; }
+    .live-code::before { content: 'Code'; }
+    .live-actions::before { content: 'Actions'; }
+    .live-countdown::before { content: 'Countdown'; }
+    .standard-table .live-actions .action-group { justify-content: flex-end; }
+    .qr-clash-card { grid-template-columns: 1fr; }
+    .qr-code-wrap { justify-items: start; }
+    .qr-caption { text-align: left; }
+    .qr-code-wrap img { width: 120px; height: 120px; }
+    .qr-actions { justify-items: stretch; }
+  }
 </style>
 </head>
 <body>
@@ -51,147 +171,220 @@
       <img src="/static/flags/sv.svg" alt="Svenska" />
     </div>
   </div>
-  <h2 data-i18n="liveQueue">👀 Live Customer Queue</h2>
+
+  <h2 class="page-title" data-i18n="liveQueue">👀 Live Customer Queue</h2>
   {% include 'nav_bar.html' %}
-  <table id="table">
-    <thead>
-      <tr>
-        <th data-i18n="assignCustomerNumber">Customer Number</th>
-        <th data-i18n="colProvider">Provider</th>
-        <th class="separator-right" data-i18n="colDigits">Digits</th>
-        <th class="after-separator" data-i18n="colKode">Afhentningskode</th>
-  <th data-i18n="colCollectionActions">Collection</th>
-        <th data-i18n="colCountdown">Countdown</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+
+  <div class="queue-stack">
+    <section class="queue-section" id="normalSection">
+      <div class="queue-header">
+        <h3>Standard Queue</h3>
+        <div class="queue-meta" id="normalMeta"></div>
+      </div>
+      <table id="normalTable" class="standard-table">
+        <colgroup>
+          <col class="live-number">
+          <col class="live-provider">
+          <col class="live-last4">
+          <col class="live-code">
+          <col class="live-actions">
+          <col class="live-countdown">
+        </colgroup>
+        <thead>
+          <tr>
+            <th data-i18n="assignCustomerNumber">Customer Number</th>
+            <th data-i18n="colProvider">Provider</th>
+            <th data-i18n="colDigits">Digits</th>
+            <th data-i18n="colKode">Afhentningskode</th>
+            <th data-i18n="colCollectionActions">Collection</th>
+            <th data-i18n="colCountdown">Countdown</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-state hidden" id="normalEmpty">No active standard queue rows.</div>
+    </section>
+
+    <div class="queue-divider" id="qrDivider"></div>
+
+    <section class="queue-section" id="qrSection">
+      <div class="queue-header">
+        <h3>QR Clash Queue</h3>
+        <div class="queue-meta" id="qrMeta"></div>
+      </div>
+      <div id="qrTable" class="qr-clash-list"></div>
+      <div class="empty-state hidden" id="qrEmpty">No active QR clash rows.</div>
+    </section>
+  </div>
 
 <script>
-let entriesCache = [];
+let i18n = null;
+let currentLang = 'da';
 
-async function loadEntries() {
-  const res = await fetch('/customer_entries');
-  const data = await res.json();
-  const tbody = document.querySelector('#table tbody');
-  tbody.innerHTML = '';
+function formatLiveProviderName(provider) {
+  return /^post\s*nord$/i.test(provider || '') ? 'PostN' : provider;
+}
 
-  entriesCache = data; // store for countdown updates
+function getRemainingSeconds(row) {
+  const createdAt = new Date(row.created_at);
+  const elapsed = (new Date() - createdAt) / 1000;
+  return Math.max(0, typeof row.remaining === 'number' ? row.remaining : (300 - elapsed));
+}
 
-  const now = new Date();
+function applyFinalizedColor(tr, row) {
+  const isFinalized = (typeof row.ticket_number === 'number' && row.ticket_number > 0) || (!!row.collection_id);
+  if (!isFinalized) return;
+  const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
+  const groupIdx = ((basis - 1) % 10) + 1;
+  tr.classList.add(`customer-color-${groupIdx}`);
+}
 
-  for (const row of data) {
-    const createdAt = new Date(row.created_at);
-    const elapsed = (now - createdAt) / 1000;
-    // Prefer server-computed remaining (hold-aware). Fallback to naive calc.
-    const remaining = Math.max(0, typeof row.remaining === 'number' ? row.remaining : (300 - elapsed));
+function countdownMarkup(row, remaining, color) {
+  return `
+    <td class="countdown live-countdown" data-entry-id="${row.id}" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" data-paused="0" style="display:flex; gap:8px; align-items:center; justify-content:center;">
+      <button aria-label="Pause/Resume" title="Pause/Resume" onclick="togglePause(${row.id})" style="background:none;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;">
+        <svg id="icon-${row.id}" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+          <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+        </svg>
+      </button>
+      <span class="time-text" style="color:${color};">${remaining.toFixed(0)}s</span>
+    </td>
+  `;
+}
 
-    const tr = document.createElement('tr');
+function applyHeldState(rowId, held) {
+  const cell = document.querySelector(`.countdown[data-entry-id="${rowId}"]`);
+  if (!cell) return;
+  cell.dataset.held = held ? '1' : '0';
+  const icon = document.getElementById(`icon-${rowId}`);
+  if (!icon) return;
+  if (held) {
+    icon.innerHTML = '<path d="M5 3v18l15-9z"/>';
+    icon.setAttribute('stroke', 'green');
+    icon.setAttribute('fill', 'green');
+  } else {
+    icon.innerHTML = '<rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect>';
+    icon.setAttribute('stroke', 'red');
+    icon.setAttribute('fill', 'none');
+  }
+}
 
-    // color-code remaining text. Group background is only applied for finalized entries
-    const color =
-      remaining <= 15 ? 'red' :
-      remaining <= 60 ? 'orange' : 'green';
-
-    // Determine whether this entry is considered "finalized" for coloring.
-    // We treat entries with an assigned ticket_number or a collection_id as finalized.
-    const isFinalized = (typeof row.ticket_number === 'number' && row.ticket_number > 0) || (!!row.collection_id);
-    if (isFinalized) {
-      const basis = (typeof row.ticket_number === 'number' && row.ticket_number > 0) ? row.ticket_number : (row.id || 0);
-      const groupIdx = ((basis - 1) % 10) + 1; // 1..10
-      tr.classList.add(`customer-color-${groupIdx}`);
-    } else {
-      // ensure no group class is set; keep default (white) background
-    }
-
-  const holdStart = i18n?.[currentLang]?.holdStart || 'Pause';
-  const holdPause = i18n?.[currentLang]?.holdPause || 'Continue';
-    const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
-    const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
-
-    tr.innerHTML = `
-      <td class="live-number">${row.ticket_number ?? ''}</td>
-      <td class="live-provider">${row.provider}</td>
-      <td class="live-last4 separator-right">${row.digits}</td>
-      <td class="live-code after-separator">${row.kode ?? ''}</td>
-      <td class="live-actions">
+function buildStandardRow(row) {
+  const remaining = getRemainingSeconds(row);
+  const color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
+  const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
+  const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
+  const providerName = formatLiveProviderName(row.provider);
+  const tr = document.createElement('tr');
+  applyFinalizedColor(tr, row);
+  tr.innerHTML = `
+    <td class="live-number">${row.ticket_number ?? ''}</td>
+    <td class="live-provider">${providerName}</td>
+    <td class="live-last4">${row.digits}</td>
+    <td class="live-code">${row.kode ?? ''}</td>
+    <td class="live-actions">
+      <div class="action-group">
         <button onclick="deliveredEntry(${row.id})">${delivered}</button>
         <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
-      </td>
-      <td class="countdown live-countdown" data-entry-id="${row.id}" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" data-paused="0" style="color:${color}; display:flex; gap:8px; align-items:center; justify-content:center;">
+      </div>
+    </td>
+    ${countdownMarkup(row, remaining, color)}
+  `;
+  return tr;
+}
+
+function buildQrRow(row) {
+  const remaining = getRemainingSeconds(row);
+  const delivered = i18n?.[currentLang]?.delivered || 'Delivered';
+  const notDelivered = i18n?.[currentLang]?.notDelivered || 'Not Delivered';
+  const providerName = formatLiveProviderName(row.provider);
+  const card = document.createElement('article');
+  card.className = 'qr-clash-card';
+  applyFinalizedColor(card, row);
+  const qrSrc = row.QR ? `/qr_svg?value=${encodeURIComponent(row.QR)}` : '';
+  card.innerHTML = `
+    <div class="qr-card-main">
+      <div class="qr-ticket">Customer ${row.ticket_number ?? ''}</div>
+      <div class="qr-provider-line">
+        <span class="qr-provider">${providerName}</span>
+        <span class="qr-secondary">${row.kode ? `Code ${row.kode}` : 'QR clash'}</span>
+      </div>
+      <div class="qr-primary">${row.digits}</div>
+    </div>
+    <div class="qr-code-wrap">
+      ${qrSrc ? `<img src="${qrSrc}" alt="QR code for ${row.digits}">` : ''}
+      <div class="qr-caption">${row.QR || ''}</div>
+    </div>
+    <div class="qr-actions">
+      <button onclick="deliveredEntry(${row.id})">${delivered}</button>
+      <button onclick="notDeliveredEntry(${row.id})">${notDelivered}</button>
+    </div>
+    <div class="qr-timer countdown live-countdown" data-entry-id="${row.id}" data-remaining="${remaining.toFixed(0)}" data-held="${row.held ? '1':'0'}" data-paused="0">
+      <div class="qr-timer-head">Countdown</div>
+      <div class="qr-code-wrap">
         <button aria-label="Pause/Resume" title="Pause/Resume" onclick="togglePause(${row.id})" style="background:none;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;">
-          <!-- default: red pause icon (will toggle to green play when paused) -->
           <svg id="icon-${row.id}" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="6" y="4" width="4" height="16" rx="1"></rect>
             <rect x="14" y="4" width="4" height="16" rx="1"></rect>
           </svg>
         </button>
         <span class="time-text">${remaining.toFixed(0)}s</span>
-      </td>
-    `;
-
-    tbody.appendChild(tr);
-    // Reflect server-side hold state for this entry (packet-specific)
-    try {
-      const cell = tbody.querySelector(`.countdown[data-entry-id="${row.id}"]`);
-      if (cell) {
-        // server provides `held` flag per row; when held, show play icon (green)
-        if (row.held) {
-          cell.dataset.held = '1';
-          const icon = document.getElementById(`icon-${row.id}`);
-          if (icon) {
-            icon.innerHTML = '<path d="M5 3v18l15-9z"/>'; // play triangle
-            icon.setAttribute('stroke', 'green');
-            icon.setAttribute('fill', 'green');
-          }
-        } else {
-          cell.dataset.held = '0';
-        }
-      }
-    } catch (e) { /* ignore DOM errors */ }
+      </div>
+    </div>
+  `;
+  const timeText = card.querySelector('.time-text');
+  if (timeText) {
+    timeText.style.color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
   }
+  return card;
+}
+
+function renderSection(rows, tableId, emptyId, metaId, isQrClash) {
+  const tbody = isQrClash ? document.getElementById(tableId) : document.querySelector(`#${tableId} tbody`);
+  const empty = document.getElementById(emptyId);
+  const meta = document.getElementById(metaId);
+  tbody.innerHTML = '';
+  meta.textContent = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
+  empty.classList.toggle('hidden', rows.length > 0);
+  if (rows.length === 0) return;
+  rows.forEach((row) => {
+    const tr = isQrClash ? buildQrRow(row) : buildStandardRow(row);
+    tbody.appendChild(tr);
+    applyHeldState(row.id, !!row.held);
+  });
+}
+
+async function loadEntries() {
+  const res = await fetch('/customer_entries');
+  const data = await res.json();
+  const normalRows = data.filter((row) => !row.is_qr_clash);
+  const qrRows = data.filter((row) => row.is_qr_clash);
+  renderSection(normalRows, 'normalTable', 'normalEmpty', 'normalMeta', false);
+  renderSection(qrRows, 'qrTable', 'qrEmpty', 'qrMeta', true);
+  document.getElementById('qrSection').classList.toggle('hidden', qrRows.length === 0);
+  document.getElementById('qrDivider').classList.toggle('hidden', qrRows.length === 0);
 }
 
 function updateCountdowns() {
   const cells = document.querySelectorAll('.countdown');
-  cells.forEach(cell => {
+  cells.forEach((cell) => {
     const held = cell.dataset.held === '1';
     const paused = cell.dataset.paused === '1';
     let remaining = parseInt(cell.dataset.remaining || '0', 10);
-    // Do not decrement if paused or held
     if (!held && !paused && remaining > 0) {
       remaining -= 1;
       cell.dataset.remaining = String(remaining);
     }
-    // update displayed time text (preserve other children like icon/button)
     const timeSpan = cell.querySelector('.time-text');
-    if (timeSpan) timeSpan.textContent = `${remaining}s`;
-    // color the time text according to remaining
-    const color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
-    // apply to the time text only
-    if (timeSpan) timeSpan.style.color = color;
+    if (timeSpan) {
+      timeSpan.textContent = `${remaining}s`;
+      timeSpan.style.color = remaining <= 15 ? 'red' : remaining <= 60 ? 'orange' : 'green';
+    }
   });
 }
 
-async function holdStartEntry(id) {
-  await fetch('/hold_entry', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ entry_id: id })
-  });
-  loadEntries(); // refresh after hold
-}
-
-async function holdPauseEntry(id) {
-  await fetch('/unhold_entry', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ entry_id: id })
-  });
-  loadEntries();
-}
-
-async function resolve(id, action){
+async function resolve(id, action) {
   await fetch('/resolve_entry', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -203,52 +396,52 @@ async function resolve(id, action){
 function deliveredEntry(id) { resolve(id, 'collected'); }
 function notDeliveredEntry(id) { resolve(id, 'keep'); }
 
-// --- Pause / resume per-row (client-side, persisted in localStorage) ---
-// Toggle pause by calling server-side hold/unhold so pause is packet-specific
 function togglePause(entryId) {
   const cell = document.querySelector(`.countdown[data-entry-id="${entryId}"]`);
   if (!cell) return;
   const held = cell.dataset.held === '1';
-  // If currently held on the server, call unhold; otherwise call hold
   const url = held ? '/unhold_entry' : '/hold_entry';
   fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ entry_id: entryId })
-  }).then(res => {
-    // refresh entries so UI + remaining sync with server state
+  }).then(() => {
     loadEntries();
-  }).catch(err => console.warn('hold toggle failed', err));
+  }).catch((err) => console.warn('hold toggle failed', err));
 }
 
-// refresh table every 2s, update timers every 1s
-setInterval(loadEntries, 2000);
-setInterval(updateCountdowns, 1000);
-// --- i18n for staff page ---
-let i18n = null; let currentLang = 'da';
 async function loadTranslations() {
-  try { const res = await fetch('/static/translations.json'); if (res.ok) i18n = await res.json(); } catch {}
+  try {
+    const res = await fetch('/static/translations.json');
+    if (res.ok) i18n = await res.json();
+  } catch {}
 }
+
 function applyI18n() {
   if (!i18n) return;
-  document.querySelectorAll('[data-i18n]').forEach(el => {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
     const key = el.getAttribute('data-i18n');
     const txt = i18n[currentLang]?.[key];
     if (txt) el.textContent = txt;
   });
   document.documentElement.lang = currentLang;
 }
-function updateLanguage(lang){
+
+function updateLanguage(lang) {
   currentLang = lang;
-  document.querySelectorAll('.flags .flag').forEach(el => {
+  document.querySelectorAll('.flags .flag').forEach((el) => {
     const active = el.dataset.lang === lang;
     el.classList.toggle('active', active);
     el.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   applyI18n();
+  loadEntries();
 }
 
-(async function init(){
+setInterval(loadEntries, 2000);
+setInterval(updateCountdowns, 1000);
+
+(async function init() {
   await loadTranslations();
   applyI18n();
   updateLanguage(currentLang);

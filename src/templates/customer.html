@@ -395,6 +395,10 @@
     // QR-driven auto-escalation
     let qrRawCode = null; // full scanned QR string (raw)
     let isQrAuto = false; // when true, handleSubmit will auto-advance using qrSessionDigits
+    function clearQrSession() {
+      isQrAuto = false;
+      qrRawCode = null;
+    }
     function getSelectedProviderConfig() {
       return providersCfg.find(p => p.key === selectedProvider) || null;
     }
@@ -458,31 +462,8 @@
     function extractDigitsByRule(code, n) {
       if (!code || !n) return '';
       const s = String(code).trim().toUpperCase();
-      // Helpers
-      const lastTwo = s.slice(-2);
-      const isTwoDigits = /^\d{2}$/.test(lastTwo);
-      const isTwoLetters = /^[A-Z]{2}$/.test(lastTwo);
-      const lastIsAlpha = /[A-Z]$/.test(s);
-      const secondLastIsDigit = /\d$/.test(s.slice(-2, -1));
-
-      // Case 1: last two are digits → take last n digits from end of string
-      if (isTwoDigits) {
-        const digits = s.replace(/\D+/g, '');
-        return digits.slice(-n);
-      }
-      // Case 2: last two are letters → take the n characters before them, then filter digits
-      if (isTwoLetters && s.length >= n + 2) {
-        const seg = s.slice(-(n + 2), -2);
-        return (seg.match(/\d/g) || []).join('').slice(-n);
-      }
-      // Case 3: last is letter and second-last is digit → mirror Python offset rule generalized by n
-      if (lastIsAlpha && secondLastIsDigit && s.length >= n + 7) {
-        const seg = s.slice(-(n + 7), -7);
-        return (seg.match(/\d/g) || []).join('').slice(-n);
-      }
-      // Fallback: take last n digits across the whole string
       const digits = s.replace(/\D+/g, '');
-      return digits.slice(-n);
+      return digits.slice(0, n);
     }
 
     function renderProviders() {
@@ -544,6 +525,65 @@
         // No instructional text needed per new spec
     }
 
+    function resetParcelEntryUi({ clearEntries = false } = {}) {
+      selectedProvider = null;
+      inputDigits = '';
+      lastLookupCount = 0;
+      targetLen = 0;
+      kodeDigits = '';
+      kodeTargetLen = 5;
+
+      if (clearEntries) {
+        sessionId = null;
+        entryIds = [];
+      }
+
+      document.querySelectorAll('.provider').forEach(el => {
+        el.classList.remove('selected');
+        el.classList.remove('dim');
+      });
+
+      const boxes = document.getElementById('boxes');
+      if (boxes) boxes.innerHTML = '';
+
+      const prompt = document.getElementById('prompt');
+      if (prompt) {
+        prompt.textContent = '';
+        prompt.style.display = 'none';
+      }
+
+      const helper = document.getElementById('helper');
+      if (helper) helper.textContent = '';
+
+      const message = document.getElementById('message');
+      if (message) {
+        message.className = 'msg';
+        message.textContent = '';
+      }
+
+      const qrBtn = document.getElementById('scanQrBtn');
+      if (qrBtn) qrBtn.style.display = 'none';
+
+      const clearBtn = document.getElementById('clearBtn');
+      if (clearBtn) clearBtn.style.display = 'none';
+
+      const submitBtn = document.getElementById('submitBtn');
+      if (submitBtn) submitBtn.style.display = 'none';
+
+      if (autoSubmitTimer) {
+        clearTimeout(autoSubmitTimer);
+        autoSubmitTimer = null;
+      }
+      if (kodeAutoTimer) {
+        clearTimeout(kodeAutoTimer);
+        kodeAutoTimer = null;
+      }
+
+      activeKeyHandler = handleKey;
+      hideSoftKeyboard();
+      updateVirtualKeypadVisibility();
+    }
+
     // --- Digit boxes ---
     let activeKeyHandler = null; // will point to handleKey or handleKodeKey depending on context
     function globalKeydown(e) {
@@ -573,10 +613,10 @@
         if (!providerAsksLast4()) {
           txt = localizedCodePrompt(count);
         } else {
-          if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter the last 4 digits';
-          else if (count === 6) txt = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
-          else if (count === 8) txt = (i18n?.[currentLang]?.promptLast8) || 'Enter the last 8 digits';
-          else if (count === 10) txt = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+          if (count === 4) txt = (i18n?.[currentLang]?.promptLast4) || 'Enter 4 digits';
+          else if (count === 6) txt = (i18n?.[currentLang]?.promptLast6) || 'Enter 6 digits';
+          else if (count === 8) txt = (i18n?.[currentLang]?.promptLast8) || 'Enter 8 digits';
+          else if (count === 10) txt = (i18n?.[currentLang]?.promptLast10) || 'Enter 10 digits';
         }
         promptEl.textContent = txt;
         promptEl.style.display = 'block';
@@ -716,60 +756,41 @@
       const data = await res.json();
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
+      const isQrLookup = targetLen === 4 && isQrAuto && !!qrRawCode;
 
       if (providerAsksLast4()) {
         // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
+          if (isQrLookup) {
+            if (providerNeedsExtraCode()) { openKodeModal(); return; }
+            await submitCustomerEntry();
+            return;
+          }
           if (targetLen === 4) {
             targetLen = 6;
-            if (isQrAuto && qrRawCode) {
-              inputDigits = extractDigitsByRule(qrRawCode, 6);
-              if (inputDigits.length === 6) {
-                renderInputBoxes(targetLen);
-                // auto-continue
-                await new Promise(r=>setTimeout(r, 50));
-                return handleSubmit();
-              }
-            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            msg.textContent = (i18n?.[currentLang]?.clash_multiple_6) || 'Multiple packets match. Please enter the last 6 digits.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast6) || 'Enter the last 6 digits';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_6) || 'Multiple packets match. Please enter 6 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast6) || 'Enter 6 digits';
             return;
           }
           if (targetLen === 6) {
             targetLen = 8;
-            if (isQrAuto && qrRawCode) {
-              inputDigits = extractDigitsByRule(qrRawCode, 8);
-              if (inputDigits.length === 8) {
-                renderInputBoxes(targetLen);
-                await new Promise(r=>setTimeout(r, 50));
-                return handleSubmit();
-              }
-            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            msg.textContent = (i18n?.[currentLang]?.clash_multiple_8) || 'Multiple packets match. Please enter the last 8 digits.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast8) || 'Enter the last 8 digits';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_8) || 'Multiple packets match. Please enter 8 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast8) || 'Enter 8 digits';
             return;
           }
           if (targetLen === 8) {
             targetLen = 10;
-            if (isQrAuto && qrRawCode) {
-              inputDigits = extractDigitsByRule(qrRawCode, 10);
-              if (inputDigits.length === 10) {
-                renderInputBoxes(targetLen);
-                await new Promise(r=>setTimeout(r, 50));
-                return handleSubmit();
-              }
-            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            msg.textContent = (i18n?.[currentLang]?.clash_multiple_10) || 'Multiple packets match. Please enter the last 10 digits.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+            msg.textContent = (i18n?.[currentLang]?.clash_multiple_10) || 'Multiple packets match. Please enter 10 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter 10 digits';
             return;
           }
           if (targetLen === 10) {
@@ -777,7 +798,7 @@
             msg.className = 'msg error';
             msg.textContent = (i18n?.[currentLang]?.stillMultipleAt10ContactStaff) || 'Multiple parcels match. Please contact staff.';
             // stop QR auto
-            isQrAuto = false; qrRawCode = null;
+            clearQrSession();
             return;
           }
         }
@@ -785,39 +806,23 @@
         if (results.length === 0) {
           if (targetLen === 8) {
             targetLen = 10;
-            if (isQrAuto && qrRawCode) {
-              inputDigits = extractDigitsByRule(qrRawCode, 10);
-              if (inputDigits.length === 10) {
-                renderInputBoxes(targetLen);
-                await new Promise(r=>setTimeout(r, 50));
-                return handleSubmit();
-              }
-            }
             inputDigits = '';
             renderInputBoxes(targetLen);
             msg.className = 'msg error';
-            msg.textContent = (i18n?.[currentLang]?.noMatchAsk10) || 'No match found. Please enter the last 10 digits.';
-            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter the last 10 digits';
+            msg.textContent = (i18n?.[currentLang]?.noMatchAsk10) || 'No match found. Please enter 10 digits.';
+            document.getElementById('prompt').textContent = (i18n?.[currentLang]?.promptLast10) || 'Enter 10 digits';
             return;
           }
           msg.classList.add('error');
           msg.textContent = (i18n?.[currentLang]?.noMatch)||'No match found. Try again.';
           // stop QR auto if first 4 didn't match
-          isQrAuto = false; qrRawCode = null;
+          clearQrSession();
           return;
         }
         // Unique match
         if (results.length === 1) {
-          if (targetLen === 10) {
-            // After 10 digits, instruct to contact staff instead of auto-proceed
-            msg.className = 'msg success';
-            msg.textContent = (i18n?.[currentLang]?.uniqueAt10ContactStaff) || 'Unique match found. Please contact staff.';
-            isQrAuto = false; qrRawCode = null;
-            return;
-          }
-          if (providerNeedsExtraCode()) { isQrAuto = false; qrRawCode = null; openKodeModal(); return; }
+          if (providerNeedsExtraCode()) { openKodeModal(); return; }
           // Otherwise submit entry immediately
-          isQrAuto = false; qrRawCode = null;
           await submitCustomerEntry();
           return;
         }
@@ -830,6 +835,7 @@
         payload.kode = kode;
       } else {
         payload.digits = inputDigits;
+        if (isQrAuto && qrRawCode) payload.qr_raw = qrRawCode;
         if (kode) payload.kode = kode;
       }
       if (kode) payload.kode = kode;
@@ -842,6 +848,7 @@
         const msg = document.getElementById('message');
         msg.className = 'msg error';
         msg.textContent = (i18n?.[currentLang]?.noMatch)||'Ingen match fundet. Prøv igen.';
+        clearQrSession();
         return;
       }
 
@@ -853,6 +860,7 @@
   // success -> store entry id and prompt for more packets
   const newId = (typeof data.id !== 'undefined') ? data.id : data.entry_id;
   if (newId && !entryIds.includes(newId)) entryIds.push(newId);
+  clearQrSession();
   const finalInfo = document.getElementById('finalInfo');
   if (finalInfo) finalInfo.style.display = 'none';
   const ticketInfo = document.getElementById('ticketInfo');
@@ -875,24 +883,24 @@
       document.getElementById('kodeOverlay').classList.add('show');
       activeKeyHandler = handleKodeKey; // redirect key events to kode modal
       document.getElementById('kodeMsg').textContent = '';
+      updateVirtualKeypadVisibility();
       // ensure keyboard is up for kode entry
       focusSoftKeyboard();
     }
     function closeKode() {
       document.getElementById('kodeOverlay').classList.remove('show');
       activeKeyHandler = handleKey;
+      updateVirtualKeypadVisibility();
     }
     function renderKodeBoxes(count) {
       const wrap = document.getElementById('kodeBoxes');
       wrap.innerHTML = '';
       for (let i=0;i<count;i++) {
         const b = document.createElement('div');
-      updateVirtualKeypadVisibility();
         b.className = 'box' + (i === kodeDigits.length ? ' active' : '');
         b.textContent = kodeDigits[i] || '';
         wrap.appendChild(b);
       }
-      updateVirtualKeypadVisibility();
     }
     function handleKodeKey(e) {
       const msg = document.getElementById('kodeMsg');
@@ -925,19 +933,8 @@
     // --- Success modal actions ---
     function nextParcel() {
       document.getElementById('doneOverlay').classList.remove('show');
-      inputDigits=''; lastLookupCount=0; // keep provider
-      renderInputBoxes(targetLen);
-      document.getElementById('message').textContent = '';
-      const qrBtn = document.getElementById('scanQrBtn');
-      if (qrBtn) {
-        const showQr = selectedProvider && providerAsksLast4() && targetLen === 4;
-        qrBtn.style.display = showQr ? '' : 'none';
-      }
-      // restore all providers to bright again
-      document.querySelectorAll('.provider').forEach(el => el.classList.remove('dim'));
-      setTimeout(()=>focusActiveBox(), 50);
-      // Do not show keyboard until a provider is chosen
-      hideSoftKeyboard();
+      clearQrSession();
+      resetParcelEntryUi();
     }
     async function assignCustomerNumber() {
       // Ask backend for a rolling 1..99 number and show it
@@ -1032,11 +1029,8 @@
     function finishSession() {
       document.getElementById('doneOverlay').classList.remove('show');
       // reset everything
-      selectedProvider = null; inputDigits=''; lastLookupCount=0; targetLen=0; sessionId=null; entryIds=[];
-      document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('selected'));
-      document.getElementById('providers').querySelectorAll('.provider').forEach(el=>el.classList.remove('dim'));
-      document.getElementById('boxes').innerHTML='';
-      document.getElementById('helper').textContent='';
+      clearQrSession();
+      resetParcelEntryUi({ clearEntries: true });
       // keep prompt hidden per new spec
       // Reset modal UI to initial state for next time
       const yesBtn = document.getElementById('yesBtn');
@@ -1055,9 +1049,6 @@
       if (clearBtn) clearBtn.style.display = 'none';
       const submitBtn = document.getElementById('submitBtn');
       if (submitBtn) submitBtn.style.display = 'none';
-      // Hide keyboard until a provider is chosen in the new session
-      hideSoftKeyboard();
-      updateVirtualKeypadVisibility();
     }
 
     // --- QR Scanner ---

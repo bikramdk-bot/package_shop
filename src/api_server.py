@@ -1,6 +1,6 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-from lookup import search_parcel, insert_parcel, update_status, delete_parcel
+from lookup import search_parcel, insert_parcel, update_status, delete_parcel, backfill_packet_lookup_variants
 from license_manager import (
     ensure_token_db,
     ensure_default_license,
@@ -10,6 +10,7 @@ from license_manager import (
     start_license_monitor,
 )
 import sqlite3, os
+import io
 from datetime import datetime, timedelta, date
 import threading, time
 import json
@@ -18,6 +19,8 @@ import subprocess
 import glob
 import re
 from typing import Optional, List, Dict
+import qrcode
+from qrcode.image.svg import SvgPathImage
 from paths import resolve_data, init_dirs_and_migrate
 
 app = Flask(__name__)
@@ -518,23 +521,66 @@ def set_scanner():
 
 
 def _derive_variant_from_barcode(code, n):
-    """Mirror 4-digit extraction rules for N in {6,8,10}.
-
-    - If ends with two digits: use last N
-    - If ends with two letters: take N before those two
-    - If ends with digit+letter and len>=N+7: slice s[-(N+7):-7]
-    - Else: fallback to last N if available
-    """
+    """Return the first N numeric digits extracted from a barcode."""
     if not code:
         return None
     s = str(code).strip()
-    if len(s) >= n and s[-2:].isdigit():
-        return s[-n:]
-    if len(s) >= n + 2 and s[-2:].isalpha():
-        return s[-(n + 2):-2]
-    if len(s) >= n + 7 and s[-1].isalpha() and s[-2].isdigit():
-        return s[-(n + 7):-7]
-    return s[-n:] if len(s) >= n else None
+    digits = "".join(ch for ch in s if ch.isdigit())
+    return digits[:n] if len(digits) >= n else None
+
+
+def _packet_lookup_column(digits: str) -> str:
+    length = len((digits or "").strip())
+    if length >= 10:
+        return "digit10"
+    if length >= 8:
+        return "digit8"
+    if length >= 6:
+        return "digit6"
+    return "digits"
+
+
+def _find_packet_matches(cursor, provider: str, digits: str, limit: int = 50):
+    column = _packet_lookup_column(digits)
+    cursor.execute(
+        f"""
+        SELECT id, provider, digits, barcode, status, scan_time
+        FROM packets
+        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
+          AND (
+                {column} = ?
+             OR {column} LIKE '%' || ?
+             OR ? LIKE '%' || COALESCE({column}, '')
+             OR barcode = ?
+             OR barcode LIKE '%' || ?
+          )
+        ORDER BY datetime(scan_time) DESC
+        LIMIT ?
+        """,
+        (provider, digits, digits, digits, digits, digits, limit),
+    )
+    return cursor.fetchall()
+
+
+def _find_best_packet_match(cursor, provider: str, digits: str):
+    rows = _find_packet_matches(cursor, provider, digits, limit=1)
+    return rows[0] if rows else None
+
+
+def _entry_is_qr_clash(entry) -> bool:
+    if isinstance(entry, sqlite3.Row):
+        keys = entry.keys()
+        has_kind = "entry_kind" in keys and (entry["entry_kind"] or "") == "qr_clash"
+        has_qr = "QR" in keys and bool(entry["QR"])
+        return bool(has_kind or has_qr)
+    return bool(((entry or {}).get("entry_kind") or "") == "qr_clash" or bool((entry or {}).get("QR")))
+
+
+def _serialize_customer_entry(entry) -> Dict:
+    data = dict(entry)
+    data["QR"] = data.get("QR") or None
+    data["is_qr_clash"] = _entry_is_qr_clash(data)
+    return data
 
 # ---------- SQLite helpers ----------
 def open_db():
@@ -644,6 +690,7 @@ def run_migrations():
                         cur.execute(f"ALTER TABLE {table} DROP COLUMN {legacy}")
                     except sqlite3.OperationalError:
                         pass
+        backfill_packet_lookup_variants(conn)
         cur.execute("PRAGMA table_info(customer_entries)")
         cols = [r[1] for r in cur.fetchall()]
         if 'kode' not in cols:
@@ -661,6 +708,10 @@ def run_migrations():
             cur.execute("ALTER TABLE customer_entries ADD COLUMN number_assigned_at TEXT")
         if 'ticket_number' not in cols2:
             cur.execute("ALTER TABLE customer_entries ADD COLUMN ticket_number INTEGER")
+        if 'QR' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN QR TEXT")
+        if 'entry_kind' not in cols2:
+            cur.execute("ALTER TABLE customer_entries ADD COLUMN entry_kind TEXT DEFAULT 'standard'")
         # Simple single-row counter for kiosk ticket numbers (1..99 roll-over)
         cur.execute(
             """
@@ -702,42 +753,20 @@ def run_migrations():
         # non-fatal: if thread can't start, app still runs
         pass
 
-    # Backfill digit6/8/10 for existing rows based on barcode (best-effort)
-    try:
-        conn = open_db()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, barcode, digit6, digit8, digit10 FROM packets
-            WHERE barcode IS NOT NULL AND (digit6 IS NULL OR digit8 IS NULL OR digit10 IS NULL)
-            """
-        )
-        rows = cur.fetchall()
-        for rid, barcode, d6, d8, d10 in rows:
-            n6 = d6 or _derive_variant_from_barcode(barcode, 6)
-            n8 = d8 or _derive_variant_from_barcode(barcode, 8)
-            n10 = d10 or _derive_variant_from_barcode(barcode, 10)
-            cur.execute("UPDATE packets SET digit6=?, digit8=?, digit10=? WHERE id=?", (n6, n8, n10, rid))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
-
 def cleanup_old_packets():
-    """Delete packets whose scan_time is older than 8 days.
+    """Delete packets whose scan_time is older than 15 days.
 
-    Uses SQLite builtin datetime('now','-8 days') so no timezone arithmetic in Python.
+    Uses SQLite builtin datetime('now','-15 days') so no timezone arithmetic in Python.
     Returns number of deleted rows.
     """
     conn = open_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+        cur.execute("SELECT COUNT(*) FROM packets WHERE datetime(scan_time) <= datetime('now','-15 days')")
         row = cur.fetchone()
         to_delete = int(row[0] or 0)
         if to_delete > 0:
-            cur.execute("DELETE FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+            cur.execute("DELETE FROM packets WHERE datetime(scan_time) <= datetime('now','-15 days')")
             conn.commit()
         return to_delete
     finally:
@@ -755,7 +784,7 @@ def start_cleanup_scheduler(interval_hours: int = 24):
             try:
                 n = cleanup_old_packets()
                 if n:
-                    print(f"[cleanup] removed {n} packets older than 8 days")
+                    print(f"[cleanup] removed {n} packets older than 15 days")
             except Exception as e:
                 print(f"[cleanup] error: {e}")
             # Sleep between runs; small sleep to allow quicker shutdown responsiveness
@@ -831,32 +860,7 @@ def lookup_parcel():
             conn = open_db()
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            # Choose column by input length: 4->digits, 6->digit6, 8->digit8, 10->digit10
-            n = len(digs)
-            if n >= 10:
-                col = "digit10"
-            elif n >= 8:
-                col = "digit8"
-            elif n >= 6:
-                col = "digit6"
-            else:
-                col = "digits"
-            # Build query: match by chosen column, with lenient suffix matching fallback
-            q = f"""
-                SELECT id, provider, digits, barcode FROM packets
-                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                  AND (
-                        {col} = ?
-                     OR {col} LIKE '%' || ?
-                     OR ? LIKE '%' || COALESCE({col}, '')
-                     OR barcode = ?
-                     OR barcode LIKE '%' || ?
-                  )
-                ORDER BY datetime(scan_time) DESC
-                LIMIT 50
-            """
-            c.execute(q, (prov, digs, digs, digs, digs, digs))
-            rows = [dict(r) for r in c.fetchall()]
+            rows = [dict(r) for r in _find_packet_matches(c, prov, digs, limit=50)]
             conn.close()
             return jsonify({"results": rows})
 
@@ -868,7 +872,8 @@ def lookup_parcel():
     cursor.execute(
         """
                                 SELECT id, provider, digits, kode, collection_id, status, created_at,
-               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated
+               hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               number_assigned_at, QR, COALESCE(entry_kind, 'standard') AS entry_kind
         FROM customer_entries
         ORDER BY created_at ASC
         """
@@ -896,23 +901,7 @@ def lookup_parcel():
         effective_elapsed = (now - start_dt).total_seconds() - hold_total
         if effective_elapsed >= 300:
             c2 = conn.cursor()
-            c2.execute(
-                        """
-                                                SELECT id, provider, digits, barcode FROM packets
-                                                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                                                    AND (
-                                                                digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
-                                                         OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
-                                                         OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
-                                                    )
-                                                ORDER BY datetime(scan_time) DESC
-                                                LIMIT 1
-                                                """,
-                                                (e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
-                                                 e["digits"], e["digits"], e["digits"], e["digits"],
-                                                 e["digits"], e["digits"], e["digits"], e["digits"]),
-                                        )
-            packet = c2.fetchone()
+            packet = None if _entry_is_qr_clash(e) else _find_best_packet_match(c2, e["provider"], e["digits"])
             if packet:
                 c2.execute(
                     """
@@ -996,34 +985,19 @@ def lookup_parcel():
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
                hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               QR, COALESCE(entry_kind, 'standard') AS entry_kind,
                number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
     )
-    entries = [dict(r) for r in cursor.fetchall()]
+    entries = [_serialize_customer_entry(r) for r in cursor.fetchall()]
 
     now = datetime.utcnow()
     for e in entries:
         # matched flag (only consider packets still in shop), case-insensitive provider
         c2 = conn.cursor()
-        c2.execute(
-            """
-            SELECT COUNT(*) FROM packets
-            WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-              AND (
-                    digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
-                 OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
-                 OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
-              )
-            """,
-            (
-                e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
-                e["digits"], e["digits"], e["digits"], e["digits"],
-                e["digits"], e["digits"], e["digits"], e["digits"]
-            )
-        )
-        e["matched"] = c2.fetchone()[0] > 0
+        e["matched"] = False if e["is_qr_clash"] else bool(_find_best_packet_match(c2, e["provider"], e["digits"]))
         # remaining time starts after number_assigned_at
         start_str = e.get("number_assigned_at")
         start_dt = None
@@ -1100,7 +1074,7 @@ def get_customer_entries():
 
     # 1️⃣ Identify expired (non-held) customer entries (only after number assignment)
     cursor.execute("""
-        SELECT id, provider, digits FROM customer_entries
+                SELECT id, provider, digits, QR, COALESCE(entry_kind, 'standard') AS entry_kind FROM customer_entries
         WHERE status != 'hold'
           AND number_assigned_at IS NOT NULL
           AND number_assigned_at <= datetime('now', '-300 seconds')
@@ -1111,22 +1085,7 @@ def get_customer_entries():
         c2 = conn.cursor()
 
         # 2️⃣ Check if packet matched
-        c2.execute(
-                        """
-                                                SELECT id, provider, digits, barcode FROM packets
-                                                WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                                                    AND (
-                                                                digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
-                                                         OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
-                                                         OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
-                                                    )
-                                                ORDER BY datetime(scan_time) DESC
-                                                LIMIT 1
-                                                """,
-                                                (e["provider"], e["digits"], e["digits"], e["digits"], e["digits"],
-                                                 e["digits"], e["digits"], e["digits"], e["digits"],
-                                                 e["digits"], e["digits"], e["digits"], e["digits"]))
-        packet = c2.fetchone()
+        packet = None if _entry_is_qr_clash(e) else _find_best_packet_match(c2, e["provider"], e["digits"])
 
         if packet:
             # ✅ Case 1: Matched → collected
@@ -1217,12 +1176,13 @@ def get_customer_entries():
         """
         SELECT id, provider, digits, kode, collection_id, status, created_at,
                hold_started_at, COALESCE(hold_accumulated,0) AS hold_accumulated,
+               QR, COALESCE(entry_kind, 'standard') AS entry_kind,
                number_assigned_at, ticket_number
         FROM customer_entries
         ORDER BY created_at DESC
         """
     )
-    entries = [dict(r) for r in cursor.fetchall()]
+    entries = [_serialize_customer_entry(r) for r in cursor.fetchall()]
 
     now2 = datetime.utcnow()
     for e in entries:
@@ -1253,7 +1213,9 @@ def get_customer_entries():
         c2 = conn.cursor()
         prov_upper = (e.get("provider") or "").upper()
         # BRING entries are matched by their 5-digit kode (often stored in digits or barcode)
-        if prov_upper == 'BRING' and e.get("kode"):
+        if e["is_qr_clash"]:
+            e["matched"] = False
+        elif prov_upper == 'BRING' and e.get("kode"):
             kode = e.get("kode")
             c2.execute(
                 """
@@ -1263,6 +1225,7 @@ def get_customer_entries():
                 """,
                 (e["provider"], kode, kode, kode, kode, kode),
             )
+            e["matched"] = c2.fetchone()[0] > 0
         else:
             c2.execute(
                 """
@@ -1271,7 +1234,7 @@ def get_customer_entries():
                     AND (digits = ? OR digits LIKE '%' || ? OR ? LIKE '%' || digits)
                 """,
                 (e["provider"], e["digits"], e["digits"], e["digits"]))
-        e["matched"] = c2.fetchone()[0] > 0
+            e["matched"] = c2.fetchone()[0] > 0
 
     # 6️⃣ Convert created_at to ISO format for browser (so countdown works)
     for e in entries:
@@ -1356,24 +1319,8 @@ def resolve_entry():
     digits = entry["digits"]
     c2 = conn.cursor()
     packet = None
-    if provider and digits:
-        c2.execute(
-            """
-                        SELECT id, provider, digits, barcode FROM packets
-                        WHERE UPPER(provider)=UPPER(?) AND status='in_shop'
-                            AND (
-                                        digits = ? OR digit6 = ? OR digit8 = ? OR digit10 = ?
-                                 OR ? LIKE '%' || digits OR ? LIKE '%' || digit6 OR ? LIKE '%' || digit8 OR ? LIKE '%' || digit10
-                                 OR digits LIKE '%' || ? OR digit6 LIKE '%' || ? OR digit8 LIKE '%' || ? OR digit10 LIKE '%' || ?
-                            )
-                        ORDER BY datetime(scan_time) DESC
-                        LIMIT 1
-                        """,
-                        (provider, digits, digits, digits, digits,
-                         digits, digits, digits, digits,
-                         digits, digits, digits, digits),
-        )
-        packet = c2.fetchone()
+    if provider and digits and not _entry_is_qr_clash(entry):
+        packet = _find_best_packet_match(c2, provider, digits)
     if packet:
         c2.execute(
             "INSERT INTO collected_log (provider, digits, barcode, log_type) VALUES (?, ?, ?, 'collected_staff')",
@@ -1489,6 +1436,20 @@ def customer_page():
 @app.route("/live_customers")
 def live_customers():
     return render_template("live_customers.html")
+
+
+@app.route("/qr_svg")
+def qr_svg():
+    value = (request.args.get("value") or "").strip()
+    if not value:
+        return jsonify({"error": "Missing value"}), 400
+    qr = qrcode.QRCode(border=1, box_size=8)
+    qr.add_data(value)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage)
+    buffer = io.BytesIO()
+    image.save(buffer)
+    return Response(buffer.getvalue(), mimetype="image/svg+xml")
 
 @app.route("/manual_label_page")
 def manual_label_page():
@@ -1609,6 +1570,7 @@ def create_customer_entry():
     provider = _sanitize_provider_name(data.get("provider"))
     digits = (data.get("digits") or "").strip()
     kode = (data.get("kode") or "").strip() or None
+    qr_value = (data.get("qr_raw") or "").strip() or None
 
     if not provider:
         return jsonify({"error": "Missing provider"}), 400
@@ -1628,18 +1590,84 @@ def create_customer_entry():
         return jsonify({"error": f"{provider} must ask for digits or collection code"}), 400
 
     conn = open_db()
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
+    entry_kind = 'standard'
+    if ask_last4 and qr_value:
+        digits = _derive_variant_from_barcode(qr_value, 4) or digits
+        if not digits:
+            conn.close()
+            return jsonify({"matched": False, "error": "Could not read digits from QR"}), 400
+        match_count = len(_find_packet_matches(cur, provider, digits, limit=2))
+        if match_count == 0:
+            conn.close()
+            return jsonify({"matched": False})
+        if match_count > 1:
+            entry_kind = 'qr_clash'
     cur.execute(
         """
-        INSERT INTO customer_entries (provider, digits, kode, status, created_at)
-        VALUES (?, ?, ?, 'pending', strftime('%Y-%m-%d %H:%M:%S','now'))
+        INSERT INTO customer_entries (provider, digits, kode, QR, entry_kind, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', strftime('%Y-%m-%d %H:%M:%S','now'))
         """,
-        (provider, digits, kode)
+        (provider, digits, kode, qr_value if entry_kind == 'qr_clash' else None, entry_kind)
     )
     entry_id = cur.lastrowid
     conn.commit()
     conn.close()
-    return jsonify({"id": entry_id, "provider": provider, "digits": digits, "kode": kode})
+    return jsonify({
+        "id": entry_id,
+        "provider": provider,
+        "digits": digits,
+        "kode": kode,
+        "QR": qr_value if entry_kind == 'qr_clash' else None,
+        "entry_kind": entry_kind,
+        "is_qr_clash": entry_kind == 'qr_clash',
+    })
+
+
+@app.route("/qr_clash_candidates")
+def qr_clash_candidates():
+    conn = open_db()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    entry_id = request.args.get("entry_id", type=int)
+    if entry_id:
+        cursor.execute(
+            """
+            SELECT id, provider, digits, kode, QR, ticket_number, created_at,
+                   COALESCE(entry_kind, 'standard') AS entry_kind
+            FROM customer_entries
+            WHERE id = ?
+            """,
+            (entry_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Entry not found"}), 404
+        entry = _serialize_customer_entry(row)
+        candidates = []
+        if entry["is_qr_clash"]:
+            candidates = [dict(r) for r in _find_packet_matches(cursor, entry["provider"], entry["digits"], limit=200)]
+        conn.close()
+        return jsonify({"entry": entry, "candidates": candidates})
+
+    cursor.execute(
+        """
+        SELECT id, provider, digits, kode, QR, ticket_number, created_at,
+               COALESCE(entry_kind, 'standard') AS entry_kind
+        FROM customer_entries
+        WHERE COALESCE(entry_kind, 'standard') = 'qr_clash'
+        ORDER BY datetime(created_at) DESC
+        """
+    )
+    entries = []
+    for row in cursor.fetchall():
+        entry = _serialize_customer_entry(row)
+        entry["candidates"] = [dict(r) for r in _find_packet_matches(cursor, entry["provider"], entry["digits"], limit=200)]
+        entries.append(entry)
+    conn.close()
+    return jsonify(entries)
 
 @app.route("/assign_collection", methods=["POST"])
 def assign_collection():
@@ -1917,6 +1945,13 @@ def delete_parcel_api():
     except Exception:
         return jsonify({"error": "Missing or invalid id"}), 400
 
+    clash_entry_id = data.get("clash_entry_id")
+    if clash_entry_id is not None:
+        try:
+            clash_entry_id = int(clash_entry_id)
+        except Exception:
+            return jsonify({"error": "Invalid clash_entry_id"}), 400
+
     conn = open_db()
     cursor = conn.cursor()
     cursor.execute(
@@ -1926,6 +1961,14 @@ def delete_parcel_api():
         """,
         (row_id,),
     )
+    if clash_entry_id is not None:
+        cursor.execute(
+            """
+            DELETE FROM customer_entries
+            WHERE id = ? AND COALESCE(entry_kind, 'standard') = 'qr_clash'
+            """,
+            (clash_entry_id,),
+        )
     conn.commit()
     conn.close()
     return jsonify({"message": "Packet deleted."})

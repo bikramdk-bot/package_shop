@@ -9,6 +9,20 @@
     .flag { width: 40px; height: 28px; border-radius: 4px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.12); display: inline-flex; align-items: center; justify-content: center; background: #fff; }
     .flag.active { outline: 3px solid #0ea5e9; outline-offset: 2px; }
     .flag img { width: 28px; height: 20px; display: block; }
+    .clash-section { margin-top: 28px; }
+    .clash-grid { display: grid; gap: 16px; }
+    .clash-card { border: 1px solid #dbe4f0; border-radius: 16px; background: #fff; box-shadow: 0 10px 24px rgba(15,23,42,0.08); padding: 16px; }
+    .clash-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
+    .clash-summary { display: grid; gap: 6px; }
+    .clash-title { font-size: 1.15rem; font-weight: 700; }
+    .clash-meta { color: #475569; }
+    .clash-qr { display: grid; justify-items: center; gap: 8px; }
+    .clash-qr img { width: 120px; height: 120px; object-fit: contain; border: 1px solid #cbd5e1; border-radius: 12px; padding: 6px; background: #fff; }
+    .clash-qr code { font-size: 0.75rem; color: #475569; word-break: break-all; }
+    .clash-candidates { width: 100%; border-collapse: collapse; }
+    .clash-candidates th, .clash-candidates td { border: 1px solid #dbe4f0; padding: 8px 10px; text-align: left; }
+    .clash-candidates th { background: #eef2ff; }
+    .clash-empty { color: #64748b; font-style: italic; }
     /* License expired overlay */
     #licenseBlocker { position: fixed; inset: 0; background: rgba(255,255,255,0.96); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 900; text-align: center; padding: 20px; }
     #licenseBlocker h2 { margin: 0; font-size: 1.4rem; }
@@ -90,6 +104,11 @@
     </select>
   </div>
 
+  <section class="clash-section">
+    <h2>QR Clash Cleanup</h2>
+    <div id="clashGrid" class="clash-grid"></div>
+  </section>
+
   <table id="parcelTable">
     <thead>
       <tr>
@@ -107,6 +126,7 @@
 
   <script>
   let cache = [];
+  let clashCache = [];
   // Format a timestamp into `DD-mon` (e.g. 12-apr). Returns empty string for falsy input.
   function formatEntryDate(ts) {
     if (!ts) return '';
@@ -145,6 +165,13 @@
     const res = await fetch('/all_parcels');
     cache = await res.json();
     render();
+    await loadQrClashes();
+  }
+
+  async function loadQrClashes() {
+    const res = await fetch('/qr_clash_candidates');
+    clashCache = res.ok ? await res.json() : [];
+    renderQrClashes();
   }
 
   async function addPacket(){
@@ -213,6 +240,63 @@
     });
   }
 
+  function renderQrClashes() {
+    const wrap = document.getElementById('clashGrid');
+    wrap.innerHTML = '';
+    if (!Array.isArray(clashCache) || clashCache.length === 0) {
+      wrap.innerHTML = '<div class="clash-empty">No QR clash rows are waiting for cleanup.</div>';
+      return;
+    }
+
+    clashCache.forEach((entry) => {
+      const card = document.createElement('article');
+      card.className = 'clash-card';
+      const candidateRows = Array.isArray(entry.candidates) ? entry.candidates.map((candidate) => {
+        const entryDateStr = formatEntryDate(candidate.scan_time || '');
+        return `
+          <tr>
+            <td>${candidate.id}</td>
+            <td>${candidate.provider}</td>
+            <td>${candidate.digits}</td>
+            <td>${candidate.barcode || ''}</td>
+            <td>${entryDateStr}</td>
+            <td><button onclick="deleteParcel(${candidate.id}, ${entry.id})">🗑️ Delete</button></td>
+          </tr>
+        `;
+      }).join('') : '';
+
+      card.innerHTML = `
+        <div class="clash-head">
+          <div class="clash-summary">
+            <div class="clash-title">Ticket ${entry.ticket_number ?? ''} · ${entry.provider} · ${entry.digits}</div>
+            <div class="clash-meta">Entry #${entry.id}${entry.kode ? ` · Code ${entry.kode}` : ''}</div>
+            <div class="clash-meta">${candidateRows ? `${entry.candidates.length} candidate packet rows` : 'No current packet candidates'}</div>
+          </div>
+          <div class="clash-qr">
+            ${entry.QR ? `<img src="/qr_svg?value=${encodeURIComponent(entry.QR)}" alt="QR clash ${entry.digits}">` : ''}
+            <code>${entry.QR || ''}</code>
+          </div>
+        </div>
+        ${candidateRows ? `
+          <table class="clash-candidates">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Provider</th>
+                <th>Digits</th>
+                <th>Barcode</th>
+                <th>Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>${candidateRows}</tbody>
+          </table>
+        ` : '<div class="clash-empty">No packets currently match these first 4 digits.</div>'}
+      `;
+      wrap.appendChild(card);
+    });
+  }
+
   async function updateStatus(provider, digits, status) {
     await fetch('/update_status', {
       method: 'POST',
@@ -222,12 +306,16 @@
     loadParcels();
   }
 
-  async function deleteParcel(id) {
+  async function deleteParcel(id, clashEntryId = null) {
     if (!id && id !== 0) return;
+    const body = {id};
+    if (clashEntryId !== null && clashEntryId !== undefined) {
+      body.clash_entry_id = clashEntryId;
+    }
     await fetch('/delete_parcel', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id})
+      body: JSON.stringify(body)
     });
     loadParcels();
   }

@@ -1,10 +1,75 @@
-import sqlite3, os 
+import sqlite3, os, re
 from datetime import datetime
 from paths import resolve_data, init_dirs_and_migrate
 
 # ✅ Same DB used by dashboard (externalized)
 init_dirs_and_migrate()
 DB_PATH = str(resolve_data("packets.db"))
+
+
+def _numeric_tail(value, length):
+    digits = "".join(ch for ch in str(value or "").strip() if ch.isdigit())
+    return digits[-length:] if len(digits) >= length else None
+
+
+def _derive_lookup_variant(barcode, fallback_digits, length):
+    source = str(barcode or "").strip().upper()
+    if source:
+        if len(source) >= length and source[-2:].isdigit():
+            candidate = source[-length:]
+            if candidate.isdigit():
+                return candidate
+        if len(source) >= length + 2 and re.fullmatch(r"[A-Z]{2}", source[-2:]):
+            candidate = source[-(length + 2):-2]
+            if candidate.isdigit():
+                return candidate
+        if len(source) >= length + 7 and source[-1].isalpha() and source[-2].isdigit():
+            candidate = source[-(length + 7):-7]
+            if candidate.isdigit():
+                return candidate
+        numeric_tail = _numeric_tail(source, length)
+        if numeric_tail:
+            return numeric_tail
+    return _numeric_tail(fallback_digits, length)
+
+
+def derive_packet_lookup_variants(barcode=None, digits=None):
+    return {
+        "digit6": _derive_lookup_variant(barcode, digits, 6),
+        "digit8": _derive_lookup_variant(barcode, digits, 8),
+        "digit10": _derive_lookup_variant(barcode, digits, 10),
+    }
+
+
+def backfill_packet_lookup_variants(conn):
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, digits, barcode, digit6, digit8, digit10
+        FROM packets
+        WHERE COALESCE(digit6, '') = ''
+           OR COALESCE(digit8, '') = ''
+           OR COALESCE(digit10, '') = ''
+        """
+    )
+    updates = []
+    for packet_id, digits, barcode, digit6, digit8, digit10 in cursor.fetchall():
+        variants = derive_packet_lookup_variants(barcode=barcode, digits=digits)
+        next_digit6 = digit6 or variants["digit6"]
+        next_digit8 = digit8 or variants["digit8"]
+        next_digit10 = digit10 or variants["digit10"]
+        if next_digit6 != digit6 or next_digit8 != digit8 or next_digit10 != digit10:
+            updates.append((next_digit6, next_digit8, next_digit10, packet_id))
+    if updates:
+        cursor.executemany(
+            """
+            UPDATE packets
+            SET digit6 = ?, digit8 = ?, digit10 = ?
+            WHERE id = ?
+            """,
+            updates,
+        )
+    return len(updates)
 
 
 # ---------------------- INIT ----------------------
@@ -32,6 +97,7 @@ def init_db():
         for col in ("digit6", "digit8", "digit10"):
             if col not in cols:
                 cursor.execute(f"ALTER TABLE packets ADD COLUMN {col} TEXT")
+        backfill_packet_lookup_variants(conn)
         conn.commit()
     except Exception:
         pass
@@ -40,24 +106,6 @@ def init_db():
 
 
 # ---------------------- INSERT ----------------------
-def _variant_from_barcode(code, n):
-    """Apply same rules as 4-digit extraction for N=6,8,10 on barcode.
-    - End with two digits: last N
-    - End with two letters: N before those two
-    - End with digit+letter and len>=N+7: s[-(N+7):-7]
-    - Else: last N (if available)
-    """
-    if not code:
-        return None
-    s = str(code).strip().upper()
-    if len(s) >= n and s[-2:].isdigit():
-        return s[-n:]
-    if len(s) >= n + 2 and s[-2:].isalpha():
-        return s[-(n + 2):-2]
-    if len(s) >= n + 7 and s[-1].isalpha() and s[-2].isdigit():
-        return s[-(n + 7):-7]
-    return s[-n:] if len(s) >= n else None
-
 def insert_parcel(provider, digits, barcode=None):
     """Insert a new packet entry.
 
@@ -65,8 +113,7 @@ def insert_parcel(provider, digits, barcode=None):
     already exists with status 'in_shop', block the new insert. The 4 digits
     do not affect duplicate detection.
 
-    Variant columns (digit6/8/10) are simple tail slices of the raw barcode
-    if provided (NULL otherwise). No frontend dependency.
+    Store the supplied digits and barcode exactly as provided.
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -85,15 +132,14 @@ def insert_parcel(provider, digits, barcode=None):
             conn.close()
             return {"warning": "Packet already exists (same provider+barcode) and is in_shop."}
 
-    digit6 = _variant_from_barcode(barcode, 6)
-    digit8 = _variant_from_barcode(barcode, 8)
-    digit10 = _variant_from_barcode(barcode, 10)
+    variants = derive_packet_lookup_variants(barcode=barcode, digits=digits)
+
     cursor.execute(
         """
         INSERT INTO packets (provider, digits, digit6, digit8, digit10, barcode, status, scan_time)
         VALUES (?, ?, ?, ?, ?, ?, 'in_shop', ?)
         """,
-        (provider, digits, digit6, digit8, digit10, barcode, datetime.now()),
+        (provider, digits, variants["digit6"], variants["digit8"], variants["digit10"], barcode, datetime.now()),
     )
     conn.commit()
     conn.close()
