@@ -754,19 +754,19 @@ def run_migrations():
         pass
 
 def cleanup_old_packets():
-    """Delete packets whose scan_time is older than 8 days.
+    """Delete packets whose scan_time is older than 15 days.
 
-    Uses SQLite builtin datetime('now','-8 days') so no timezone arithmetic in Python.
+    Uses SQLite builtin datetime('now','-15 days') so no timezone arithmetic in Python.
     Returns number of deleted rows.
     """
     conn = open_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+        cur.execute("SELECT COUNT(*) FROM packets WHERE datetime(scan_time) <= datetime('now','-15 days')")
         row = cur.fetchone()
         to_delete = int(row[0] or 0)
         if to_delete > 0:
-            cur.execute("DELETE FROM packets WHERE datetime(scan_time) <= datetime('now','-8 days')")
+            cur.execute("DELETE FROM packets WHERE datetime(scan_time) <= datetime('now','-15 days')")
             conn.commit()
         return to_delete
     finally:
@@ -784,7 +784,7 @@ def start_cleanup_scheduler(interval_hours: int = 24):
             try:
                 n = cleanup_old_packets()
                 if n:
-                    print(f"[cleanup] removed {n} packets older than 8 days")
+                    print(f"[cleanup] removed {n} packets older than 15 days")
             except Exception as e:
                 print(f"[cleanup] error: {e}")
             # Sleep between runs; small sleep to allow quicker shutdown responsiveness
