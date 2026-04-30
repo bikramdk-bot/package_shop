@@ -756,11 +756,12 @@
       const data = await res.json();
       const results = data?.results || [];
       lastLookupCount = results.length || 0;
+      const isQrLookup = targetLen === 4 && isQrAuto && !!qrRawCode;
 
       if (providerAsksLast4()) {
         // Handle multiple matches (clash) with escalation 4 -> 6 -> 8 -> 10
         if (results.length > 1) {
-          if (targetLen === 4 && isQrAuto && qrRawCode) {
+          if (isQrLookup) {
             if (providerNeedsExtraCode()) { openKodeModal(); return; }
             await submitCustomerEntry();
             return;
@@ -820,13 +821,6 @@
         }
         // Unique match
         if (results.length === 1) {
-          if (targetLen === 10) {
-            // After 10 digits, instruct to contact staff instead of auto-proceed
-            msg.className = 'msg success';
-            msg.textContent = (i18n?.[currentLang]?.uniqueAt10ContactStaff) || 'Unique match found. Please contact staff.';
-            clearQrSession();
-            return;
-          }
           if (providerNeedsExtraCode()) { openKodeModal(); return; }
           // Otherwise submit entry immediately
           await submitCustomerEntry();

@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-from lookup import search_parcel, insert_parcel, update_status, delete_parcel
+from lookup import search_parcel, insert_parcel, update_status, delete_parcel, backfill_packet_lookup_variants
 from license_manager import (
     ensure_token_db,
     ensure_default_license,
@@ -690,6 +690,7 @@ def run_migrations():
                         cur.execute(f"ALTER TABLE {table} DROP COLUMN {legacy}")
                     except sqlite3.OperationalError:
                         pass
+        backfill_packet_lookup_variants(conn)
         cur.execute("PRAGMA table_info(customer_entries)")
         cols = [r[1] for r in cur.fetchall()]
         if 'kode' not in cols:
