@@ -9,7 +9,7 @@ Responsibilities:
 Token format: <shop_id>-<months>M-<rand4>-<mac6>
 - mac6 = first 6 hex chars of HMAC-SHA256(SECRET_SALT, f"{shop_id}|{months}|{rand4}|{cpu_id}")
 
-All paths are resolved relative to this file's directory.
+Runtime files are stored in the external data directory resolved by paths.py.
 """
 from __future__ import annotations
 

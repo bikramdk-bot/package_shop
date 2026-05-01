@@ -56,6 +56,10 @@ From the repository root:
 python src/api_server.py
 ```
 
+Helper launchers are also available:
+- `scripts/dev_run.ps1` for PowerShell
+- `scripts/dev_run.sh` for POSIX shells
+
 ## Hardware-specific testing
 
 Scanner device access, CUPS, printer devices, and Raspberry Pi service behavior should be validated on a staging Pi, not only on a workstation development environment.

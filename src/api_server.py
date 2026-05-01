@@ -11,17 +11,18 @@ from license_manager import (
 )
 import sqlite3, os
 import io
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 import threading, time
 import json
 import socket
 import subprocess
 import glob
 import re
+from pathlib import Path
 from typing import Optional, List, Dict
 import qrcode
 from qrcode.image.svg import SvgPathImage
-from paths import resolve_data, init_dirs_and_migrate
+from paths import resolve_data, init_dirs_and_migrate, get_data_dir, get_config_dir, get_log_dir, get_run_dir
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
@@ -37,6 +38,16 @@ start_license_monitor()
 
 # Use external data directory for DB storage
 DB_PATH = str(resolve_data("packets.db"))
+APP_ROOT = Path(__file__).resolve().parent.parent
+VERSION_PATH = APP_ROOT / "VERSION"
+STARTED_AT = time.time()
+
+
+def get_app_version() -> str:
+    try:
+        return VERSION_PATH.read_text(encoding="utf-8").strip() or "0.0.0-dev"
+    except Exception:
+        return "0.0.0-dev"
 
 def _detect_default_printer_device() -> str:
     """Return effective printer destination.
@@ -302,6 +313,37 @@ def write_shop_info(patch: dict):
     data.update(patch)
     with open(SHOP_INFO_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+@app.route("/version")
+def version_info():
+    return jsonify({
+        "app": "package-shop",
+        "version": get_app_version(),
+    })
+
+
+@app.route("/health")
+def health():
+    shop_info = read_shop_info() or {}
+    return jsonify({
+        "status": "ok",
+        "app": "package-shop",
+        "version": get_app_version(),
+        "uptime_seconds": int(max(0, time.time() - STARTED_AT)),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "hostname": socket.gethostname(),
+        "shop_id": (shop_info.get("shop_id") or "").strip(),
+        "printer_device": PRINTER_DEVICE,
+        "scanner_configured": bool((shop_info.get("scanner_path") or "").strip()),
+        "db_exists": os.path.exists(DB_PATH),
+        "paths": {
+            "data": str(get_data_dir()),
+            "config": str(get_config_dir()),
+            "log": str(get_log_dir()),
+            "run": str(get_run_dir()),
+        },
+    })
 
 
 @app.route("/provider_settings", methods=["GET"])
