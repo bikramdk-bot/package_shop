@@ -64,6 +64,7 @@ Optional control-plane env vars for local experimentation:
 - `PACKAGE_SHOP_CONTROL_PLANE_ENABLED=1`
 - `PACKAGE_SHOP_CONTROL_PLANE_URL=http://127.0.0.1:8080`
 - `PACKAGE_SHOP_ENVIRONMENT=development`
+- `PACKAGE_SHOP_CPU_ID=DEV-PI-001` for non-Pi local registration and heartbeat tests
 
 ## Hardware-specific testing
 

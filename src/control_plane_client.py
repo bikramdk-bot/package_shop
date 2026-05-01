@@ -63,6 +63,7 @@ def get_registered_device_id() -> Optional[str]:
 def get_control_plane_status() -> Dict[str, Any]:
     state = load_registration_state()
     registration = state.get("registration") or {}
+    heartbeat = state.get("heartbeat") or {}
     return {
         "enabled": is_control_plane_enabled(),
         "url": get_control_plane_url(),
@@ -70,6 +71,8 @@ def get_control_plane_status() -> Dict[str, Any]:
         "device_id": str(registration.get("device_id") or "").strip(),
         "registered_at": str(registration.get("registered_at") or "").strip(),
         "lease_expires_at": str(registration.get("lease_expires_at") or "").strip(),
+        "last_heartbeat_at": str(heartbeat.get("sent_at") or "").strip(),
+        "last_heartbeat_status": str(heartbeat.get("status") or "").strip(),
     }
 
 
@@ -127,27 +130,12 @@ def register_device(
         device_name=device_name,
         environment=CONTROL_PLANE_ENVIRONMENT,
     ).to_dict()
-    body = json.dumps(payload).encode("utf-8")
-    req = request.Request(
-        f"{CONTROL_PLANE_URL}/device/register",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    response_payload = _post_json(
+        path="/device/register",
+        payload=payload,
+        timeout=timeout,
+        error_prefix="registration failed",
     )
-
-    try:
-        with request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8")
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"registration failed: {exc.code} {detail}".strip()) from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"registration failed: {exc.reason}") from exc
-
-    try:
-        response_payload = json.loads(raw)
-    except Exception as exc:
-        raise RuntimeError("registration failed: invalid JSON response") from exc
 
     registration = response_payload.get("registration")
     if not isinstance(registration, dict) or not str(registration.get("device_id") or "").strip():
@@ -160,3 +148,48 @@ def register_device(
     }
     save_registration_state(state)
     return state
+
+
+def send_heartbeat(heartbeat: DeviceHeartbeat, timeout: int = 5) -> Dict[str, Any]:
+    if not is_control_plane_enabled():
+        raise RuntimeError("control plane is disabled")
+
+    response_payload = _post_json(
+        path="/device/heartbeat",
+        payload=heartbeat.to_dict(),
+        timeout=timeout,
+        error_prefix="heartbeat failed",
+    )
+
+    state = load_registration_state()
+    state["heartbeat"] = {
+        "sent_at": heartbeat.timestamp,
+        "status": str(response_payload.get("received") or "").strip() and "sent" or "unknown",
+        "device_id": heartbeat.device_id,
+    }
+    save_registration_state(state)
+    return response_payload
+
+
+def _post_json(*, path: str, payload: Dict[str, Any], timeout: int, error_prefix: str) -> Dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    req = request.Request(
+        f"{CONTROL_PLANE_URL}{path}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"{error_prefix}: {exc.code} {detail}".strip()) from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"{error_prefix}: {exc.reason}") from exc
+
+    try:
+        return json.loads(raw)
+    except Exception as exc:
+        raise RuntimeError(f"{error_prefix}: invalid JSON response") from exc

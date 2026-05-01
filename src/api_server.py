@@ -34,6 +34,7 @@ from control_plane_client import (
     get_control_plane_status,
     is_control_plane_enabled,
     register_device,
+    send_heartbeat,
 )
 
 app = Flask(__name__)
@@ -337,21 +338,12 @@ def version_info():
 @app.route("/health")
 def health():
     shop_info = read_shop_info() or {}
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    uptime_seconds = int(max(0, time.time() - STARTED_AT))
-    shop_id = (shop_info.get("shop_id") or "").strip()
-    scanner_configured = bool((shop_info.get("scanner_path") or "").strip())
+    heartbeat = _build_current_heartbeat(shop_info)
+    uptime_seconds = heartbeat.uptime_seconds
+    timestamp = heartbeat.timestamp
+    shop_id = heartbeat.shop_id
+    scanner_configured = heartbeat.scanner_configured
     device_serial = get_cpu_serial()
-    heartbeat = build_device_heartbeat(
-        shop_id=shop_id,
-        device_serial=device_serial,
-        software_version=get_app_version(),
-        status="ok",
-        uptime_seconds=uptime_seconds,
-        timestamp=timestamp,
-        scanner_configured=scanner_configured,
-        printer_device=PRINTER_DEVICE,
-    )
     return jsonify({
         "status": "ok",
         "app": "package-shop",
@@ -373,6 +365,25 @@ def health():
             "run": str(get_run_dir()),
         },
     })
+
+
+def _build_current_heartbeat(shop_info: Optional[dict] = None):
+    current_shop_info = shop_info if isinstance(shop_info, dict) else (read_shop_info() or {})
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    uptime_seconds = int(max(0, time.time() - STARTED_AT))
+    shop_id = (current_shop_info.get("shop_id") or "").strip()
+    scanner_configured = bool((current_shop_info.get("scanner_path") or "").strip())
+    device_serial = get_cpu_serial()
+    return build_device_heartbeat(
+        shop_id=shop_id,
+        device_serial=device_serial,
+        software_version=get_app_version(),
+        status="ok",
+        uptime_seconds=uptime_seconds,
+        timestamp=timestamp,
+        scanner_configured=scanner_configured,
+        printer_device=PRINTER_DEVICE,
+    )
 
 
 @app.route("/control_plane/status")
@@ -410,6 +421,24 @@ def control_plane_register():
         }), 201
     except RuntimeError as exc:
         return jsonify({"error": "registration_failed", "detail": str(exc)}), 502
+
+
+@app.route("/control_plane/heartbeat", methods=["POST"])
+def control_plane_heartbeat():
+    if not is_control_plane_enabled():
+        return jsonify({"error": "control_plane_disabled"}), 400
+
+    heartbeat = _build_current_heartbeat()
+    try:
+        response_payload = send_heartbeat(heartbeat)
+        return jsonify({
+            "ok": True,
+            "control_plane": get_control_plane_status(),
+            "heartbeat": heartbeat.to_dict(),
+            "response": response_payload,
+        })
+    except RuntimeError as exc:
+        return jsonify({"error": "heartbeat_failed", "detail": str(exc)}), 502
 
 
 @app.route("/provider_settings", methods=["GET"])
