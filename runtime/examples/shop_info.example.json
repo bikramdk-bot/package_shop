@@ -1,0 +1,5 @@
+{
+  "shop_id": "SHOP01",
+  "printer_device": "cups:ZD411",
+  "scanner_path": "/dev/input/by-id/usb-0581_011c-event-kbd"
+}

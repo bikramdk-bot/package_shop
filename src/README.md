@@ -1,132 +1,67 @@
-## Networking Overview (Hotspot‑Only)
+## Edge Runtime Notes
 
-- Hotspot/AP only: the Pi runs as a dedicated hotspot for staff devices. Client Wi‑Fi scanning/connecting features have been removed.
-- Wi‑Fi scripts removed: `wifi_manager.py` and `scripts/wifi_status_watcher.py` are no longer part of the app.
+This directory contains the Raspberry Pi edge runtime. In production, mutable state is stored outside the repository and the code reads it through the path helpers in `paths.py`.
 
-Deployment and scaling:
-- Base image: we use a base Raspberry Pi OS image that already contains all system-level setup (NetworkManager, AP config, polkit rules if used, services), so a new device works out of the box.
-- Code updates: operational scaling is done by cloning the base image to new Pis, booting, and pulling the latest app code from Git on the clone. This “clone then git pull” procedure is the current standard.
+## Runtime directories
 
-Related code paths:
-- Wi‑Fi client management and status watcher have been retired in favor of a simpler hotspot‑only setup.
+Default runtime directories:
+- Linux production: `/var/lib/package-shop`, `/etc/package-shop`, `/var/log/package-shop`, `/run/package-shop`
+- Windows development: `%PROGRAMDATA%\PackageShop` for data/config/log and `%TEMP%` for runtime files
 
-Notes:
-- AP/hotspot configuration is handled at the system level. No client Wi‑Fi configuration is needed within the app.
+Development overrides:
+- `PACKAGE_SHOP_DATA_DIR`
+- `PACKAGE_SHOP_CONFIG_DIR`
+- `PACKAGE_SHOP_LOG_DIR`
+- `PACKAGE_SHOP_RUN_DIR`
 
-## Staff Wi‑Fi Setup
+Common runtime files on Linux:
+- `/var/lib/package-shop/shop_info.json`
+- `/var/lib/package-shop/license.json`
+- `/var/lib/package-shop/packets.db`
+- `/var/lib/package-shop/token_db.sqlite`
 
-Wi‑Fi client features have been removed. The app operates over the device’s hotspot only; staff connect to the hotspot to use the dashboard and tools.
-# Simplified License System + Staff Dashboard Integration
+These files are persistent shop state and should not be committed to Git.
 
-This adds a small offline license system to the Packet Shop app with:
+## Networking overview
 
-- Shop-bound short tokens (e.g., `SHOP07-3M-X9A7-Q2F1`)
-- One central SQLite token DB (`token_db.sqlite`)
-- Default 1-month license loaded automatically on first run
-- A staff dashboard to view the current expiry and activate a token
+- Hotspot/AP only: the Pi runs as a dedicated hotspot for staff devices.
+- Wi-Fi client management inside the app has been removed.
+- AP configuration is handled at the system level, not by the Flask app.
 
-## Folder layout
+## Licensing overview
 
-```
-src/
- ├── api_server.py              # Flask app (adds /staff and /activate)
- ├── generate_token.py          # CLI to mint tokens and register them in token DB
- ├── license_manager.py         # License + token utilities
- ├── token_db_init.sql          # Schema for token_db.sqlite
- ├── shop_info.json             # { "shop_id": "SHOP07" }
- ├── license.json               # { "expiry": "YYYY-MM-DD" }
- ├── templates/
- │    └── staff_dashboard.html  # Minimal UI for staff license activation
- └── static/                    # (optional CSS)
-```
+The local licensing flow is implemented by `license_manager.py` and exposed through the staff dashboard.
 
-## Token design
+- Tokens are shop-bound and non-reusable.
+- `license.json` is created or normalized on first run.
+- `token_db.sqlite` tracks token usage.
+- The staff dashboard can activate new tokens locally.
 
-Format: `SHOP07-3M-X9A7-Q2F1`
-
-- parts: `<shop_id>-<months>M-<rand4>-<check4>`
-- `check4 = first 4 hex of SHA1(shop_id + rand4 + SECRET_SALT)`
-- `SECRET_SALT = "SALT1234"`
-
-Properties:
-- Non-reusable (marked `used=1` in `used_tokens` table)
-- Shop-locked via checksum validation
-- Typing-friendly
-
-## Database schema
-
-`token_db_init.sql`:
-
-```sql
-CREATE TABLE IF NOT EXISTS used_tokens (
-    token_id TEXT PRIMARY KEY,
-    shop_id TEXT NOT NULL,
-    issued_date DATE,
-    used BOOLEAN DEFAULT 0,
-    used_at DATETIME
-);
-```
-
-## How to run the API
-
-1. Activate your Python environment, ensure Flask is available.
-2. From `src/`, run:
+Generate a token:
 
 ```bash
-python api_server.py
+python src/generate_token.py SHOP07 3
 ```
 
-The server ensures the token DB exists and prints:
+Redeem a token:
+- Open `/staff`
+- Enter the token
+- Activate it to extend the local license expiry
 
-```
-[License] token_db.sqlite checked/created.
-```
+## Running locally
 
-Visit http://localhost:5000/staff to view the staff dashboard.
-
-## Default 1-month license
-
-On first run, `license.json` is created (or normalized) and set to at least `today + 30 days`.
-The current expiry is shown on `/staff`.
-
-## Generate and redeem tokens
-
-### 1) Generate a token (admin/owner)
+Run the API from the repository root:
 
 ```bash
-python generate_token.py SHOP07 3
+python src/api_server.py
 ```
 
-- Outputs a token like `SHOP07-3M-AB12-9F0C`
-- Inserts a row into `token_db.sqlite` with `used=0`
+For local development, point the app at a dev runtime folder with the `PACKAGE_SHOP_*` environment variables instead of using production paths.
 
-### 2) Redeem a token (staff)
+## Offline time policy
 
-- Open http://localhost:5000/staff
-- Enter the token and click "Activate Token"
-- If valid and not used, the license is extended by N months (30-day months)
-- The token is then marked as used
+For permanently offline sites, the Pi uses hardware RTC and local system time only.
 
-## Implementation details
-
-- Paths are relative to the directory of the scripts (`src/`)
-- JSON files: `shop_info.json` for shop ID and runtime settings, `license.json` for expiry
-- Date format: `YYYY-MM-DD`
-- Month extension uses 30-day months; extension is from the later of today or the current expiry
-- Flask returns HTML by default; `/activate` also supports JSON requests
-
-## Notes
-
-- You can edit `shop_info.json` to change the current `shop_id`, `scanner_path`, or `printer_device`.
-- If you change `SECRET_SALT` in `license_manager.py`, regenerate tokens accordingly.
-
-## Offline RTC Time Policy (No Internet)
-
-For permanently offline sites, the Pi uses the hardware RTC and local system time only:
-
-- At boot, `rtc-init.service` binds DS1307/DS3231 on `i2c-1` (0x68) and sets system time from RTC.
-- Periodically (every 15 minutes), `rtc-write.timer` writes system time back to RTC.
-- On shutdown, `rtc-save.service` writes system time to RTC to persist changes.
-- Network time sync is disabled; `fake-hwclock` is removed/masked.
-
-Adjust bus/address if wiring differs: change `i2c-1` in units and override `RTC_ADDR` to the correct address.
+- At boot, `rtc-init.service` binds DS1307/DS3231 on `i2c-1` and loads system time from RTC.
+- Periodic RTC writes can persist updated system time.
+- Network time sync can remain disabled for offline-only sites.

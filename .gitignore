@@ -18,6 +18,8 @@ dist/
 db/*.db
 *.sqlite
 *.log
+.runtime/
+runtime/local/
 
 # VS Code
 .vscode/

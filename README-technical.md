@@ -31,8 +31,9 @@ Make the API print via CUPS
 - If `PRINTER_DEVICE` is not set, the app tries to auto-detect the default CUPS destination.
 
 Persistent config
-- Main runtime config lives in `src/shop_info.json`.
-- The app migrates older HOME-based config into `src/shop_info.json` on startup.
+- Main mutable runtime data lives outside the repository.
+- Linux defaults are `/var/lib/package-shop` for runtime data, `/etc/package-shop` for config overrides, `/var/log/package-shop` for logs, and `/run/package-shop` for transient files.
+- Local development can override these locations with `PACKAGE_SHOP_DATA_DIR`, `PACKAGE_SHOP_CONFIG_DIR`, `PACKAGE_SHOP_LOG_DIR`, and `PACKAGE_SHOP_RUN_DIR`.
 - Example:
 
 ```json
@@ -42,9 +43,15 @@ Persistent config
 }
 ```
 
+Typical Linux runtime files:
+- `/var/lib/package-shop/shop_info.json`
+- `/var/lib/package-shop/license.json`
+- `/var/lib/package-shop/packets.db`
+- `/var/lib/package-shop/token_db.sqlite`
+
 Scanner configuration
 - Staff UI: `/staff` uses `/list-scanners` and `/set-scanner`
-- Manual config: set `scanner_path` in `src/shop_info.json`
+- Manual config: set `scanner_path` in `/var/lib/package-shop/shop_info.json`
 
 Run the scanner service in the foreground
 
@@ -65,6 +72,10 @@ After=network-online.target
 [Service]
 WorkingDirectory=/home/pi/package_shop
 Environment=PRINTER_DEVICE=cups:Zebra_ZD
+Environment=PACKAGE_SHOP_DATA_DIR=/var/lib/package-shop
+Environment=PACKAGE_SHOP_CONFIG_DIR=/etc/package-shop
+Environment=PACKAGE_SHOP_LOG_DIR=/var/log/package-shop
+Environment=PACKAGE_SHOP_RUN_DIR=/run/package-shop
 ExecStart=/usr/bin/python3 /home/pi/package_shop/src/api_server.py
 Restart=on-failure
 
@@ -78,6 +89,11 @@ Scanner listener service
 Useful checks
 - Printer:
 	- `lpstat -p -d`
+
+Deployment model
+- Code and static assets are deployed from the repository or a release bundle.
+- Shop-specific runtime files under `/var/lib/package-shop` are preserved across updates and should not be overwritten by normal code deployments.
+- Fresh Pi provisioning should create the runtime directories, seed missing runtime files from templates, and then start services.
 	- `echo ZPL | lp -d <queue> -o raw`
 - Scanner:
 	- `ls -l /dev/input/by-id/*event-kbd`

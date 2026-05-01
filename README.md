@@ -47,15 +47,19 @@ Helper scripts are also available:
 
 ## Documentation
 
-- `README-technical.md`: Raspberry Pi setup, scanner and printer integration, hotspot and RTC configuration, and reliability hardening
-- `src/README.md`: additional internal notes around networking, hotspot-only deployment, and license-related behavior
+- `README-technical.md`: Raspberry Pi setup, runtime directories, scanner and printer integration, hotspot and RTC configuration, and reliability hardening
+- `src/README.md`: edge-runtime notes, licensing behavior, and local development path overrides
+- `docs/runtime-state.md`: source of truth for repository-managed files versus Pi-managed runtime state
+- `docs/dev-environment.md`: local development setup using env-var-based runtime directories
 
 ## Repository layout
 
 ```text
 .
-├── src/                Main application code
+├── src/                Main edge application code
 ├── scripts/            Deployment and system helper scripts
+├── runtime/            Runtime examples and bootstrap scaffolding
+├── docs/               Deployment and runtime-state documentation
 ├── db/                 Database-related assets and certs
 ├── requirements.txt    Python dependencies
 ├── api_server.spec     PyInstaller build definition
@@ -66,5 +70,15 @@ Helper scripts are also available:
 ## Deployment shape
 
 The project is commonly deployed on Raspberry Pi hardware as a local kiosk system with attached scanner and printer hardware. The codebase itself is still organized so the application logic, templates, and data handling can be developed and maintained separately from the device-specific setup.
+
+## Runtime state model
+
+Production runtime state is external to the repository. On Linux, the application defaults to:
+- `/var/lib/package-shop` for mutable application data such as `shop_info.json`, `license.json`, and SQLite files
+- `/etc/package-shop` for configuration overrides when needed
+- `/var/log/package-shop` for logs
+- `/run/package-shop` for transient runtime files
+
+For local development, these paths can be overridden with `PACKAGE_SHOP_DATA_DIR`, `PACKAGE_SHOP_CONFIG_DIR`, `PACKAGE_SHOP_LOG_DIR`, and `PACKAGE_SHOP_RUN_DIR`.
 
 If you need hardware setup, service configuration, or operational Pi details, start with `README-technical.md`.
