@@ -1,5 +1,12 @@
 from flask import Flask, request, jsonify, render_template, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
+import sys
+from pathlib import Path
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
+
 from lookup import search_parcel, insert_parcel, update_status, delete_parcel, backfill_packet_lookup_variants
 from license_manager import (
     ensure_token_db,
@@ -18,11 +25,16 @@ import socket
 import subprocess
 import glob
 import re
-from pathlib import Path
 from typing import Optional, List, Dict
 import qrcode
 from qrcode.image.svg import SvgPathImage
 from paths import resolve_data, init_dirs_and_migrate, get_data_dir, get_config_dir, get_log_dir, get_run_dir
+from control_plane_client import (
+    build_device_heartbeat,
+    get_control_plane_status,
+    is_control_plane_enabled,
+    register_device,
+)
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
@@ -38,7 +50,6 @@ start_license_monitor()
 
 # Use external data directory for DB storage
 DB_PATH = str(resolve_data("packets.db"))
-APP_ROOT = Path(__file__).resolve().parent.parent
 VERSION_PATH = APP_ROOT / "VERSION"
 STARTED_AT = time.time()
 
@@ -326,17 +337,35 @@ def version_info():
 @app.route("/health")
 def health():
     shop_info = read_shop_info() or {}
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    uptime_seconds = int(max(0, time.time() - STARTED_AT))
+    shop_id = (shop_info.get("shop_id") or "").strip()
+    scanner_configured = bool((shop_info.get("scanner_path") or "").strip())
+    device_serial = get_cpu_serial()
+    heartbeat = build_device_heartbeat(
+        shop_id=shop_id,
+        device_serial=device_serial,
+        software_version=get_app_version(),
+        status="ok",
+        uptime_seconds=uptime_seconds,
+        timestamp=timestamp,
+        scanner_configured=scanner_configured,
+        printer_device=PRINTER_DEVICE,
+    )
     return jsonify({
         "status": "ok",
         "app": "package-shop",
         "version": get_app_version(),
-        "uptime_seconds": int(max(0, time.time() - STARTED_AT)),
-        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "uptime_seconds": uptime_seconds,
+        "timestamp": timestamp,
         "hostname": socket.gethostname(),
-        "shop_id": (shop_info.get("shop_id") or "").strip(),
+        "shop_id": shop_id,
+        "device_serial": device_serial,
         "printer_device": PRINTER_DEVICE,
-        "scanner_configured": bool((shop_info.get("scanner_path") or "").strip()),
+        "scanner_configured": scanner_configured,
         "db_exists": os.path.exists(DB_PATH),
+        "control_plane": get_control_plane_status(),
+        "heartbeat": heartbeat.to_dict(),
         "paths": {
             "data": str(get_data_dir()),
             "config": str(get_config_dir()),
@@ -344,6 +373,43 @@ def health():
             "run": str(get_run_dir()),
         },
     })
+
+
+@app.route("/control_plane/status")
+def control_plane_status():
+    return jsonify(get_control_plane_status())
+
+
+@app.route("/control_plane/register", methods=["POST"])
+def control_plane_register():
+    if not is_control_plane_enabled():
+        return jsonify({"error": "control_plane_disabled"}), 400
+
+    meta = get_shop_meta()
+    shop_id = str(meta.get("shop_id") or "").strip()
+    device_serial = str(meta.get("cpu_serial") or "").strip()
+    if not shop_id:
+        return jsonify({"error": "missing_shop_id"}), 400
+    if not device_serial:
+        return jsonify({"error": "missing_device_serial"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    device_name = str(payload.get("device_name") or socket.gethostname()).strip() or socket.gethostname()
+
+    try:
+        state = register_device(
+            shop_id=shop_id,
+            device_serial=device_serial,
+            software_version=get_app_version(),
+            device_name=device_name,
+        )
+        return jsonify({
+            "ok": True,
+            "control_plane": get_control_plane_status(),
+            "registration": state.get("registration") or {},
+        }), 201
+    except RuntimeError as exc:
+        return jsonify({"error": "registration_failed", "detail": str(exc)}), 502
 
 
 @app.route("/provider_settings", methods=["GET"])
@@ -381,6 +447,9 @@ def get_cpu_serial():
 
     Tries device-tree then /proc/cpuinfo. Returns None if not found.
     """
+    env_cpu_id = (os.environ.get("PACKAGE_SHOP_CPU_ID") or "").strip()
+    if env_cpu_id:
+        return env_cpu_id
     # Device tree path (preferred on modern systems)
     try:
         p = "/sys/firmware/devicetree/base/serial-number"

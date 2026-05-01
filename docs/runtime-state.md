@@ -13,6 +13,8 @@ The repository owns files that should be identical before shop-specific setup st
 - deployment scripts and helper scripts
 - example runtime files under `runtime/examples/`
 - bootstrap scaffolding under `runtime/bootstrap/`
+- shared edge/cloud schemas under `shared/`
+- cloud placeholder code under `cloud/`
 - documentation under `README.md`, `README-technical.md`, and `docs/`
 
 ## Pi-managed runtime state
@@ -24,6 +26,7 @@ Typical Linux locations:
 - `/var/lib/package-shop/license.json`
 - `/var/lib/package-shop/packets.db`
 - `/var/lib/package-shop/token_db.sqlite`
+- `/var/lib/package-shop/cloud_device.json`
 - `/var/log/package-shop/*`
 - `/run/package-shop/*`
 

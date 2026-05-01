@@ -60,6 +60,11 @@ Helper launchers are also available:
 - `scripts/dev_run.ps1` for PowerShell
 - `scripts/dev_run.sh` for POSIX shells
 
+Optional control-plane env vars for local experimentation:
+- `PACKAGE_SHOP_CONTROL_PLANE_ENABLED=1`
+- `PACKAGE_SHOP_CONTROL_PLANE_URL=http://127.0.0.1:8080`
+- `PACKAGE_SHOP_ENVIRONMENT=development`
+
 ## Hardware-specific testing
 
 Scanner device access, CUPS, printer devices, and Raspberry Pi service behavior should be validated on a staging Pi, not only on a workstation development environment.

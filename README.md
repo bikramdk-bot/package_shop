@@ -57,6 +57,8 @@ Helper scripts are also available:
 ```text
 .
 ├── src/                Main edge application code
+├── cloud/              Cloud control-plane placeholder
+├── shared/             Shared edge/cloud payload contracts
 ├── scripts/            Deployment and system helper scripts
 ├── runtime/            Runtime examples and bootstrap scaffolding
 ├── docs/               Deployment and runtime-state documentation
@@ -80,5 +82,9 @@ Production runtime state is external to the repository. On Linux, the applicatio
 - `/run/package-shop` for transient runtime files
 
 For local development, these paths can be overridden with `PACKAGE_SHOP_DATA_DIR`, `PACKAGE_SHOP_CONFIG_DIR`, `PACKAGE_SHOP_LOG_DIR`, and `PACKAGE_SHOP_RUN_DIR`.
+
+## Control-plane seam
+
+The repository now also includes a minimal cloud placeholder under `cloud/` and shared payload contracts under `shared/`. This is the first clean seam for future device registration, heartbeat, licensing, and rollout work without coupling cloud experiments to the live shop runtime.
 
 If you need hardware setup, service configuration, or operational Pi details, start with `README-technical.md`.
