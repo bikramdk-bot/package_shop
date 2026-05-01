@@ -45,6 +45,9 @@ When the cloud part is built, the focus should be on these capabilities:
    - heartbeat endpoint
    - health and metadata status
    - secure authentication and device identity
+   - mandatory monthly cloud license clearance
+   - cloud is the authoritative license controller for periodic refresh
+   - local license remains valid only when cloud clearance is successful
 
 2. Shared schema and contract stability
    - keep request/response payload definitions in `shared/schemas.py`
